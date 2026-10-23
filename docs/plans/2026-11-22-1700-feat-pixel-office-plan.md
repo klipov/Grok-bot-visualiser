@@ -19,7 +19,7 @@ One feature branch and one PR carry the app; an empty repository needs a minimal
 
 ### Summary
 
-Build the approved bright pixel office with five role-specific workspaces, a team inspector, a handoff log, and playable message delivery.
+Build the approved bright pixel art style with a floor assembled for each team's size and roles, a team inspector, a handoff log, and playable message delivery.
 Provide a usable demo and a server-side Grok connection for a user-supplied brief.
 
 ### Problem Frame
@@ -35,6 +35,9 @@ The office gives each role a visible place and makes communication observable.
 - R2. Sending a message makes its sender walk through the open aisle to the receiver's desk, deliver it, and return home.
 - R3. Users can inspect bots, read delivered messages, pause the scene, and change playback speed.
 - R4. The demo works without credentials and is clearly labelled as simulated activity.
+- R8. Users can configure 1–12 named teammates; the floor expands or contracts with the actual roster and creates no spare departments.
+- R9. Coordinator, Researcher, Librarian, Engineer, Outreach, Designer, Analyst, and Generalist roles produce visibly distinct workspace props and arrangements.
+- R10. A coordinator, when present, has a clearly separate enclosed head office; teams without a coordinator have no head office.
 
 **Grok**
 
@@ -55,9 +58,9 @@ The office gives each role a visible place and makes communication observable.
 
 ### Scope Boundaries
 
-This version is a single office with a fixed five-person team and an application-owned sequential Grok workflow.
+This version is a single configurable office with an application-owned sequential Grok workflow using the selected team.
 It does not observe existing consumer Grok chats, perform external outreach, execute code, or claim to browse sources.
-Saved accounts, durable background runs, custom floor editors, and multiplayer offices are deferred.
+Saved accounts, durable background runs, manual furniture editors, and multiplayer offices are deferred.
 
 ## Planning Contract
 
@@ -82,7 +85,7 @@ Radix supplies accessible dialog, tabs, and selection controls with project styl
 **Goal:** a runnable Next.js workspace with a tested message lifecycle.
 **Requirements:** R2, R3, R4.
 **Files:** package files, TypeScript config, `src/lib/office/team.ts`, `src/lib/office/simulation.ts`, `tests/simulation.test.ts`.
-**Approach:** define the fixed team and a renderer-neutral walking state machine.
+**Approach:** define team roles and a renderer-neutral walking state machine.
 **Patterns:** native TypeScript and Node test assertions.
 **Test scenarios:** route avoids furniture; arrival delivers once; pause preserves position; queued handoffs settle before starting another.
 **Verification:** unit tests and typecheck pass.
@@ -108,6 +111,17 @@ Radix supplies accessible dialog, tabs, and selection controls with project styl
 **Patterns:** platform fetch, Web Streams, server-only environment variables.
 **Test scenarios:** missing key; missing or incorrect token; invalid brief; mocked Responses success; partial upstream error; cancellation; UI consumes a mocked stream into walking events.
 **Verification:** deterministic provider tests and browser integration pass; real paid provider calls require credentials and are reported separately.
+
+### U4. Shape the office around the selected team
+
+**Goal:** each user's team produces the right floor size, workspaces, head office, and Grok workflow.
+**Requirements:** R8, R9, R10, R2, R5, R6.
+**Dependencies:** U1, U2, U3.
+**Files:** shared team and layout modules, procedural art and canvas, team setup dialog, role-aware demo and Grok protocol, README, layout/team/provider/browser tests.
+**Approach:** derive room geometry and aisle routes from validated roster entries; rebuild static art on roster changes and use the same roster for real calls.
+**Patterns:** existing Pixi sprite lifecycle and Radix dialogs.
+**Test scenarios:** one teammate has no invented visits; 3/6/12 members change floor bounds; repeated roles own separate desks; a lead gets a private office and removing them removes that room; custom IDs survive provider streams; duplicate IDs, excess members, and two leads are rejected before billing.
+**Verification:** unit checks cover layout and workflow, browser checks change team composition and roles and inspect the actual rendered result at desktop and mobile sizes.
 
 ## Verification Contract
 

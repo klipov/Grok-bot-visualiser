@@ -1,4 +1,24 @@
-export const team = [
+export const roles = [
+  "Coordinator",
+  "Researcher",
+  "Librarian",
+  "Engineer",
+  "Outreach",
+  "Designer",
+  "Analyst",
+  "Generalist",
+] as const;
+export type BotRole = (typeof roles)[number];
+export type BotId = string;
+export type Point = { x: number; y: number };
+export type TeamDraft = { id: BotId; name: string; role: BotRole };
+export type Bot = TeamDraft & {
+  color: string;
+  home: Point;
+  description: string;
+};
+
+export const team: readonly Bot[] = [
   {
     id: "atlas",
     name: "Atlas",
@@ -44,10 +64,8 @@ export const team = [
     description:
       "Works out the practical steps, constraints, and implementation approach.",
   },
-] as const;
+];
 
-export type BotId = (typeof team)[number]["id"];
-export type Point = { x: number; y: number };
 export type Handoff = {
   id: string;
   from: BotId;
@@ -55,11 +73,86 @@ export type Handoff = {
   message: string;
   source: "demo" | "grok";
 };
-export const botById = (id: BotId) => team.find((bot) => bot.id === id)!;
-export const isBotId = (value: unknown): value is BotId =>
-  team.some((bot) => bot.id === value);
+export const botById = (id: BotId, roster: readonly Bot[] = team) =>
+  roster.find((bot) => bot.id === id)!;
+export const isBotId = (
+  value: unknown,
+  roster: readonly Bot[] = team,
+): value is BotId => roster.some((bot) => bot.id === value);
+
+export function botFromDraft(draft: TeamDraft): Bot {
+  const preset = team.find((bot) => bot.role === draft.role);
+  const extra = {
+    Designer: {
+      color: "#d69bb9",
+      description: "Shapes the visual direction and explains design choices.",
+    },
+    Analyst: {
+      color: "#d3ad57",
+      description: "Compares the options and checks what the numbers support.",
+    },
+    Generalist: {
+      color: "#82a7a0",
+      description:
+        "Works through the brief and helps wherever the team needs a hand.",
+    },
+  };
+  const details = preset ?? extra[draft.role as keyof typeof extra];
+  return {
+    ...draft,
+    color: details.color,
+    description: details.description,
+    home: { x: 0, y: 0 },
+  };
+}
+
+export function parseTeamDrafts(value: unknown): TeamDraft[] | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 12)
+    return null;
+  const result: TeamDraft[] = [];
+  const ids = new Set<string>();
+  for (const item of value) {
+    if (
+      !item ||
+      typeof item !== "object" ||
+      typeof item.id !== "string" ||
+      !/^[a-zA-Z0-9_-]{1,64}$/.test(item.id) ||
+      ids.has(item.id) ||
+      typeof item.name !== "string" ||
+      !item.name.trim() ||
+      item.name.length > 24 ||
+      !roles.includes(item.role)
+    )
+      return null;
+    ids.add(item.id);
+    result.push({ id: item.id, name: item.name.trim(), role: item.role });
+  }
+  return result.filter((bot) => bot.role === "Coordinator").length > 1
+    ? null
+    : result;
+}
+
+export function executionOrder(roster: readonly Bot[]): Bot[] {
+  const priority: BotRole[] = [
+    "Coordinator",
+    "Researcher",
+    "Librarian",
+    "Analyst",
+    "Engineer",
+    "Designer",
+    "Outreach",
+    "Generalist",
+  ];
+  const ordered = [...roster].sort(
+    (a, b) => priority.indexOf(a.role) - priority.indexOf(b.role),
+  );
+  return ordered.length > 1 && ordered[0].role === "Coordinator"
+    ? [...ordered, ordered[0]]
+    : ordered;
+}
 
 export type OfficeCanvasProps = {
+  roster: readonly Bot[];
   handoff: Handoff | null;
   paused: boolean;
   speed: number;

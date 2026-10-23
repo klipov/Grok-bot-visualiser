@@ -1,48 +1,43 @@
-import type { BotId, Handoff } from "./team";
+import { team, executionOrder, type Bot, type Handoff } from "./team";
 
-const conversations: { from: BotId; to: BotId; message: string }[] = [
-  {
-    from: "atlas",
-    to: "mira",
-    message:
-      "Can you look into the brief? Bring back the useful findings and anything we still need to check.",
-  },
-  {
-    from: "mira",
-    to: "fern",
-    message:
-      "I've separated the ideas from the assumptions. Could you organise the notes so the team can find what it needs?",
-  },
-  {
-    from: "fern",
-    to: "kit",
-    message:
-      "The notes are organised. Start with the smallest useful version; the open questions are at the top.",
-  },
-  {
-    from: "kit",
-    to: "reed",
-    message:
-      "The first version is taking shape. Can you put together a short explanation of what it does and who it helps?",
-  },
-  {
-    from: "reed",
-    to: "atlas",
-    message:
-      "The draft is ready for your review. I kept it short and left out the claims we can't support yet.",
-  },
-  {
-    from: "atlas",
-    to: "fern",
-    message:
-      "Thanks, team. Let's keep the decisions together so we can pick up where we left off.",
-  },
-];
+const notes = {
+  Coordinator:
+    "I've broken the brief into a small plan. Can you work through your part and bring back anything the team needs to know?",
+  Researcher:
+    "I've separated useful ideas from assumptions. Please check the notes and flag anything that still needs a source.",
+  Librarian:
+    "The notes are organised. Start with the smallest useful version; the open questions are at the top.",
+  Engineer:
+    "The practical plan is ready. Can you check the details before we bring it back to the team?",
+  Outreach:
+    "The draft is ready for review. I kept it short and left out the claims we can't support yet.",
+  Designer:
+    "The visual direction is sketched out. Let's check that the layout fits the people using it.",
+  Analyst:
+    "I've compared the options. Here's what looks promising and what we still need to measure.",
+  Generalist:
+    "I've worked through my part of the brief. These notes should help with the next step.",
+};
 
-export function demoHandoff(index: number): Handoff {
+export function demoHandoff(index: number): Handoff;
+export function demoHandoff(
+  index: number,
+  roster: readonly Bot[],
+): Handoff | null;
+export function demoHandoff(
+  index: number,
+  roster: readonly Bot[] = team,
+): Handoff | null {
+  if (roster.length < 2) return null;
+  const cycle = executionOrder(roster);
+  if (cycle[0].id === cycle.at(-1)?.id) cycle.pop();
+  const from = cycle[index % cycle.length];
+  const to = cycle[(index + 1) % cycle.length];
   return {
-    ...conversations[index % conversations.length],
-    id: `demo-${index}`,
+    id: `demo-${crypto.randomUUID()}`,
+    from: from.id,
+    to: to.id,
+    message: notes[from.role],
     source: "demo",
   };
 }

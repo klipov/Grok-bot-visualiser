@@ -2,9 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Texture as PixiTexture } from "pixi.js";
-import { OFFICE_HEIGHT, OFFICE_WIDTH, project } from "@/lib/office/art";
+import {
+  drawOffice,
+  officeMetrics,
+  project,
+  spriteForRole,
+} from "@/lib/office/art";
+import { layoutOffice } from "@/lib/office/layout";
 import { advanceTrip, createTrip, type Trip } from "@/lib/office/simulation";
-import { team, type OfficeCanvasProps } from "@/lib/office/team";
+import { type OfficeCanvasProps } from "@/lib/office/team";
 import styles from "./office-canvas.module.css";
 
 export default function OfficeCanvas(props: OfficeCanvasProps) {
@@ -18,6 +24,12 @@ export default function OfficeCanvas(props: OfficeCanvasProps) {
 
   useEffect(() => {
     const host = hostRef.current!;
+    const roster = props.roster;
+    const layout = layoutOffice(roster);
+    const { width: officeWidth, height: officeHeight } = officeMetrics(layout);
+    const screenPoint = (point: { x: number; y: number }) =>
+      project(point, layout);
+    setStatus("Arranging the office…");
     let cancelled = false;
     let cleanup: (() => void) | undefined;
     const dispose = () => {
@@ -40,8 +52,8 @@ export default function OfficeCanvas(props: OfficeCanvasProps) {
       if (cancelled) return;
       const app = new Application();
       await app.init({
-        width: OFFICE_WIDTH,
-        height: OFFICE_HEIGHT,
+        width: officeWidth,
+        height: officeHeight,
         antialias: false,
         background: "#bfe8ef",
         resolution: 1,
@@ -52,33 +64,43 @@ export default function OfficeCanvas(props: OfficeCanvasProps) {
         return;
       }
       const ownedFrames: PixiTexture[] = [];
+      let background: PixiTexture | undefined;
       let observer: ResizeObserver | undefined;
       cleanup = () => {
         observer?.disconnect();
         delete host.dataset.ready;
+        delete host.dataset.teamSize;
+        delete host.dataset.rooms;
+        delete host.dataset.floorWidth;
+        delete host.dataset.floorDepth;
+        delete host.dataset.headOffices;
         app.destroy(true, {
           children: true,
           texture: false,
           textureSource: false,
         });
         for (const frame of ownedFrames) frame.destroy(false);
+        background?.destroy(true);
       };
-      const textures = await Promise.all([
-        Assets.load<PixiTexture>("/office/office.png"),
-        ...team.map((bot) => Assets.load<PixiTexture>(`/office/${bot.id}.png`)),
-      ]);
+      const textures = await Promise.all(
+        roster.map((bot) =>
+          Assets.load<PixiTexture>(`/office/${spriteForRole[bot.role]}.png`),
+        ),
+      );
       if (cancelled) return;
       textures.forEach((texture) => {
         texture.source.scaleMode = "nearest";
       });
       const world = new Container();
       app.stage.addChild(world);
-      world.addChild(new Sprite(textures[0]));
+      background = Texture.from(drawOffice(roster));
+      background.source.scaleMode = "nearest";
+      world.addChild(new Sprite(background));
       const characters = new Container();
       characters.sortableChildren = true;
       world.addChild(characters);
 
-      const bots = team.map((bot, index) => {
+      const bots = roster.map((bot, index) => {
         const container = new Container();
         const ring = new Graphics()
           .ellipse(0, 1, 12, 5)
@@ -88,7 +110,7 @@ export default function OfficeCanvas(props: OfficeCanvasProps) {
           { length: 4 },
           (_, frame) =>
             new Texture({
-              source: textures[index + 1].source,
+              source: textures[index].source,
               frame: new Rectangle(frame * 32, 0, 32, 40),
             }),
         );
@@ -150,11 +172,11 @@ export default function OfficeCanvas(props: OfficeCanvasProps) {
         const height = host.clientHeight;
         if (!width || !height) return;
         app.renderer.resize(width, height);
-        const scale = Math.min(width / OFFICE_WIDTH, height / OFFICE_HEIGHT);
+        const scale = Math.min(width / officeWidth, height / officeHeight);
         world.scale.set(scale);
         world.position.set(
-          (width - OFFICE_WIDTH * scale) / 2,
-          (height - OFFICE_HEIGHT * scale) / 2,
+          (width - officeWidth * scale) / 2,
+          (height - officeHeight * scale) / 2,
         );
       };
       observer = new ResizeObserver(resize);
@@ -163,14 +185,22 @@ export default function OfficeCanvas(props: OfficeCanvasProps) {
       host.appendChild(app.canvas);
       app.canvas.setAttribute("aria-hidden", "true");
       host.dataset.ready = "true";
+      host.dataset.teamSize = String(roster.length);
+      host.dataset.rooms = String(layout.stations.length);
+      host.dataset.floorWidth = String(layout.width);
+      host.dataset.floorDepth = String(layout.depth);
+      host.dataset.headOffices = String(
+        layout.stations.filter((station) => station.privateOffice).length,
+      );
       setStatus("");
 
       app.ticker.add((ticker) => {
         const current = live.current;
+        if (current.roster !== roster) return;
         const handoff = current.handoff;
         if ((handoff?.id ?? null) !== handoffId) {
           handoffId = handoff?.id ?? null;
-          trip = handoff ? createTrip(handoff.from, handoff.to) : null;
+          trip = handoff ? createTrip(handoff.from, handoff.to, roster) : null;
         }
         const delta = ticker.deltaMS * current.speed;
         if (!current.paused) elapsed += delta;
@@ -187,7 +217,7 @@ export default function OfficeCanvas(props: OfficeCanvasProps) {
         } of bots) {
           const isSender = handoff?.from === bot.id && trip !== null;
           const position = isSender ? trip!.position : bot.home;
-          const screen = project(position);
+          const screen = screenPoint(position);
           container.position.set(Math.round(screen.x), Math.round(screen.y));
           container.zIndex = position.x + position.y;
           const walking =
@@ -225,12 +255,12 @@ export default function OfficeCanvas(props: OfficeCanvasProps) {
               ])
               .fill(0xfff8df);
           }
-          const point = project(trip.position);
+          const point = screenPoint(trip.position);
           bubble.position.set(
             Math.max(
               4,
               Math.min(
-                OFFICE_WIDTH - bubble.width - 4,
+                officeWidth - bubble.width - 4,
                 point.x - bubble.width / 2,
               ),
             ),
@@ -250,20 +280,20 @@ export default function OfficeCanvas(props: OfficeCanvasProps) {
       dispose();
       if (!cancelled)
         setStatus(
-          "The office renderer could not start. Try reloading in a browser with WebGL enabled; the team and messages are still available below.",
+          "The office renderer could not start. Try another browser or check its graphics settings to watch the team's desk visits.",
         );
     });
     return () => {
       cancelled = true;
       dispose();
     };
-  }, []);
+  }, [props.roster]);
 
   return (
     <div
       className={styles.host}
-      role="img"
-      aria-label="Isometric pixel office. Five Grok teammates walk to one another's desks to deliver messages."
+      role="group"
+      aria-label={`Isometric pixel office with ${props.roster.length} role-specific departments${props.roster.some((bot) => bot.role === "Coordinator") ? " and a private head office" : ""}. Teammates walk to one another's desks to deliver messages.`}
     >
       <div ref={hostRef} className={styles.surface} />
       {status ? (

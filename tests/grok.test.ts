@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { runTeam, validAccessToken, validBrief } from "../src/lib/grok/run";
 import { consumeEvents, type RunEvent } from "../src/lib/grok/protocol";
 import { POST } from "../src/app/api/grok/run/route";
+import { botFromDraft } from "../src/lib/office/team";
 
 const response = (text: string) =>
   Response.json({
@@ -106,6 +107,41 @@ test("a failed provider stops the run without fabricating the remaining handoffs
     events.some((event) => event.type === "complete"),
     false,
   );
+});
+
+test("custom Grok teams call only their selected roles and do not invent a coordinator", async () => {
+  const roster = [
+    botFromDraft({ id: "ada", name: "Ada", role: "Designer" }),
+    botFromDraft({ id: "bea", name: "Bea", role: "Analyst" }),
+  ];
+  let calls = 0;
+  const events: RunEvent[] = [];
+  for await (const event of runTeam({
+    brief: "Plan a community book exchange",
+    key: "key",
+    model: "test",
+    signal: new AbortController().signal,
+    roster,
+    fetcher: async () => {
+      calls++;
+      return response("Useful team notes");
+    },
+  }))
+    events.push(event);
+  assert.equal(calls, 2);
+  assert.deepEqual(
+    events
+      .filter((event) => event.type === "working")
+      .map((event) => event.bot),
+    ["bea", "ada"],
+  );
+  assert.deepEqual(
+    events
+      .filter((event) => event.type === "handoff")
+      .map((event) => [event.handoff.from, event.handoff.to]),
+    [["bea", "ada"]],
+  );
+  assert.equal(events.at(-1)?.type, "complete");
 });
 
 test("cancelling a run prevents another provider call", async () => {

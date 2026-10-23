@@ -13,10 +13,15 @@ npm run dev
 ```
 
 Open [localhost:3000](http://localhost:3000). The demo needs no account or API key.
+Pixi uses the available WebGL, WebGPU, or Canvas renderer; the app displays an error if the graphics cannot start.
 For a production build, run `npm run build` then `npm start`.
 The local scripts bind to `127.0.0.1`; a hosting platform can use `next start --hostname 0.0.0.0` when it needs an external bind address.
 
-The five workspaces belong to Atlas (coordinator), Mira (researcher), Fern (librarian), Kit (engineer), and Reed (outreach).
+The starter team is Atlas (coordinator), Mira (researcher), Fern (librarian), Kit (engineer), and Reed (outreach).
+Open **Team setup** to name and configure 1–12 teammates. Adding or removing members rebuilds the floor to fit them.
+Each role has its own department furniture: books and shelves, research equipment, a phone station, engineering monitors, a design studio, an analyst's charts, or a general workspace.
+A coordinator is optional and gets a separate, clearly enclosed head office when present. There is no empty head office when the team has no lead.
+Team setup stays in this tab until refresh. Applying changes starts a fresh demo and disconnects an active Grok run.
 Click a character or a team row to inspect them.
 Pause and playback speed control the visual desk visits.
 The activity log records a handoff when its sender reaches the other desk, then the sender walks home.
@@ -46,8 +51,11 @@ The token is checked on every paid request, rather than merely hidden behind a b
 This app orchestrates its own team through [xAI's Responses API](https://docs.x.ai/developers/tools/function-calling).
 It does not inspect conversations or an existing team inside the consumer Grok website.
 Each role is a separate call with its own instructions and the previous roles' notes as context.
-The sequence is Atlas → Mira → Fern → Kit → Reed → Atlas.
-A run uses at most six calls with a 900-output-token limit per call and a 2,000-character brief limit.
+The server uses the selected team, ordering its roles through planning, research, organisation, analysis, implementation, design, and outreach as applicable.
+If a coordinator exists, they open and close the workflow; otherwise the last selected specialist provides the final answer.
+The starter sequence is Atlas → Mira → Fern → Kit → Reed → Atlas.
+A run makes one call per selected teammate, plus one closing coordinator call when there are colleagues: at most 13 calls, with a 900-output-token limit per call and a 2,000-character brief limit.
+The brief dialog shows the actual call limit for the current team before submission.
 API use is charged to your xAI account.
 
 The Next.js route emits newline-delimited JSON as work progresses:
@@ -97,7 +105,8 @@ Live provider verification requires an xAI key, account credits, and a supported
 
 ## Artwork
 
-The office and character sprites are original code-drawn assets committed under `public/office/`.
+The office is assembled from original code-drawn rooms at runtime, using the selected roster and roles.
+Character sprites are committed under `public/office/`.
 They render locally without an image service.
 To regenerate them, install Pillow and run:
 
@@ -107,5 +116,5 @@ python scripts/draw-office.py
 ```
 
 The saturated isometric art uses larger sprites and more prop detail rather than a hardware “bit” limit.
-Static furniture is baked once into the background; moving characters remain separate Pixi sprites.
-Visual direction was refined using [unslop by Damir Sokolovsky](https://github.com/damirsokolovsky/unslop), licensed under CC BY 4.0.
+Room geometry and furniture are drawn once for each roster into a scene texture; moving characters remain separate Pixi sprites.
+Visual direction was refined using [unslop by Damir Sokolovsky](https://heydamir.design/unslop), licensed under CC BY 4.0.

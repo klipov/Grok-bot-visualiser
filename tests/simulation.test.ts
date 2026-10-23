@@ -8,12 +8,12 @@ import {
 
 test("visits use the open aisle instead of crossing the desk rows", () => {
   const route = routeBetween("mira", "atlas");
-  assert.deepEqual(route[0], { x: 8.8, y: 5 });
-  assert.ok(route.some((point) => point.y === 7));
-  assert.equal(route.at(-1)?.y, 5);
+  assert.deepEqual(route[0], { x: 9.5, y: 5.5 });
+  assert.ok(route.some((point) => point.y === 6.9));
+  assert.equal(route.at(-1)?.y, 5.5);
   const libraryRoute = routeBetween("fern", "kit");
-  assert.ok(libraryRoute.some((point) => point.x === 7.5 && point.y === 14));
-  assert.ok(libraryRoute.some((point) => point.x === 17.7 && point.y === 7));
+  assert.ok(libraryRoute.some((point) => point.y === 13.9));
+  assert.ok(libraryRoute.every((point) => point.y >= 12.5));
 });
 
 test("pause preserves position and delivery fires once before returning home", () => {

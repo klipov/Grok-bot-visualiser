@@ -2,8 +2,19 @@
 
 import dynamic from "next/dynamic";
 import { Dialog, Select, Tabs, Tooltip } from "radix-ui";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { botById, team, type BotId, type Handoff } from "@/lib/office/team";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  botById as lookupBot,
+  team as defaultTeam,
+  roles,
+  parseTeamDrafts,
+  executionOrder,
+  type BotRole,
+  type TeamDraft,
+  type BotId,
+  type Handoff,
+} from "@/lib/office/team";
+import { createRoster } from "@/lib/office/layout";
 import { demoHandoff } from "@/lib/office/demo";
 import { consumeEvents } from "@/lib/grok/protocol";
 import styles from "./office.module.css";
@@ -53,6 +64,16 @@ function CloseButton() {
 }
 
 export default function Office() {
+  const [teamDrafts, setTeamDrafts] = useState<TeamDraft[]>(() =>
+    defaultTeam.map(({ id, name, role }) => ({ id, name, role })),
+  );
+  const team = useMemo(() => createRoster(teamDrafts), [teamDrafts]);
+  const botById = (id: BotId) => lookupBot(id, team);
+  const stages = executionOrder(team);
+  const finalBot = stages.at(-1)!;
+  const [teamOpen, setTeamOpen] = useState(false);
+  const [editorDrafts, setEditorDrafts] = useState<TeamDraft[]>([]);
+  const [teamError, setTeamError] = useState("");
   const [queue, setQueue] = useState<Handoff[]>([]);
   const [history, setHistory] = useState<Handoff[]>([]);
   const [selected, setSelected] = useState<BotId | null>(null);
@@ -83,13 +104,13 @@ export default function Office() {
   useEffect(() => () => controller.current?.abort(), []);
 
   useEffect(() => {
-    if (mode !== "demo" || queue.length || paused) return;
+    if (mode !== "demo" || queue.length || paused || team.length < 2) return;
     const timer = setTimeout(() => {
-      const next = demoHandoff(demoIndex.current++);
-      setQueue((items) => (items.length ? items : [next]));
+      const next = demoHandoff(demoIndex.current++, team);
+      if (next) setQueue((items) => (items.length ? items : [next]));
     }, 900);
     return () => clearTimeout(timer);
-  }, [mode, queue.length, paused]);
+  }, [mode, queue.length, paused, team]);
 
   const delivered = useCallback(
     (id: string) => {
@@ -122,6 +143,22 @@ export default function Office() {
     demoIndex.current = 0;
   }
 
+  function applyTeam(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const parsed = parseTeamDrafts(editorDrafts);
+    if (!parsed) {
+      setTeamError(
+        "Choose 1–12 teammates with names and at most one coordinator.",
+      );
+      return;
+    }
+    restartDemo();
+    setSelected(null);
+    setMessage(null);
+    setTeamDrafts(parsed);
+    setTeamOpen(false);
+  }
+
   async function checkConnection() {
     setConnectOpen(true);
     setTokenDraft(token);
@@ -151,12 +188,17 @@ export default function Office() {
     if (briefMode === "demo") {
       demoIndex.current = 1;
       setMode("demo");
-      setQueue([
-        {
-          ...demoHandoff(0),
-          message: `Demo brief: ${brief.trim()}\n\nThis is a simulated handoff. Connect Grok to have the team work on the brief.`,
-        },
-      ]);
+      const rehearsal = demoHandoff(0, team);
+      setQueue(
+        rehearsal
+          ? [
+              {
+                ...rehearsal,
+                message: `Demo brief: ${brief.trim()}\n\nThis is a simulated handoff. Connect Grok to have the team work on the brief.`,
+              },
+            ]
+          : [],
+      );
       return;
     }
     setMode("grok");
@@ -170,7 +212,10 @@ export default function Office() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ brief: brief.trim() }),
+        body: JSON.stringify({
+          brief: brief.trim(),
+          team: team.map(({ id, name, role }) => ({ id, name, role })),
+        }),
         signal: abort.signal,
       });
       if (!response.ok) {
@@ -182,23 +227,27 @@ export default function Office() {
         );
       }
       if (!response.body) throw new Error("The team connection didn't open");
-      await consumeEvents(response.body, (update) => {
-        if (abort.signal.aborted) return;
-        switch (update.type) {
-          case "working":
-            setWorking(update.bot);
-            break;
-          case "handoff":
-            setQueue((items) => [...items, update.handoff]);
-            break;
-          case "complete":
-            setSummary(update.summary);
-            break;
-          case "error":
-            setError(update.message);
-            break;
-        }
-      });
+      await consumeEvents(
+        response.body,
+        (update) => {
+          if (abort.signal.aborted) return;
+          switch (update.type) {
+            case "working":
+              setWorking(update.bot);
+              break;
+            case "handoff":
+              setQueue((items) => [...items, update.handoff]);
+              break;
+            case "complete":
+              setSummary(update.summary);
+              break;
+            case "error":
+              setError(update.message);
+              break;
+          }
+        },
+        team,
+      );
     } catch (cause) {
       if (!abort.signal.aborted)
         setError(
@@ -229,6 +278,16 @@ export default function Office() {
         <span className={styles.workspace}>
           Team workspace <span className={styles.divider}>/</span> Floor 01
         </span>
+        <button
+          className={styles.teamSetup}
+          onClick={() => {
+            setEditorDrafts(teamDrafts.map((draft) => ({ ...draft })));
+            setTeamError("");
+            setTeamOpen(true);
+          }}
+        >
+          Team setup <span>{team.length}</span>
+        </button>
         <button className={styles.connect} onClick={checkConnection}>
           <Icon name="plug" />
           {token ? "Grok settings" : "Connect Grok"}
@@ -292,6 +351,7 @@ export default function Office() {
             </div>
             <div className={styles.canvasArea} data-testid="office-world">
               <OfficeCanvas
+                roster={team}
                 handoff={current}
                 paused={paused}
                 speed={Number(speed)}
@@ -464,8 +524,8 @@ export default function Office() {
                     <span className={styles.smallRule} />
                     <h2>A desk for every kind of work</h2>
                     <p>
-                      Books for the librarian. A microscope for the researcher.
-                      A little room for the next idea.
+                      The floor grows with your team. Each role brings its own
+                      furniture, tools, and corner of the office.
                     </p>
                   </div>
                 )}
@@ -529,7 +589,11 @@ export default function Office() {
                       ? `${botById(working).name} is thinking`
                       : "A moment at the desk"}
                   </strong>
-                  <p>Good work starts with a conversation</p>
+                  <p>
+                    {team.length === 1
+                      ? "One teammate, one workspace. Add a colleague for desk visits."
+                      : "Good work starts with a conversation"}
+                  </p>
                 </>
               )}
               {queue.length > 1 && (
@@ -559,7 +623,9 @@ export default function Office() {
         </section>
         {summary && (
           <section className={styles.summary}>
-            <span className={styles.meta}>Atlas · Final response</span>
+            <span className={styles.meta}>
+              {finalBot.name} · Final response
+            </span>
             <h2>The team&apos;s take</h2>
             <p>{summary}</p>
             {queue.length > 0 && (
@@ -631,8 +697,9 @@ export default function Office() {
               </div>
             </form>
             <p className={styles.help}>
-              A token is checked when you run a brief. Each run makes up to six
-              xAI API calls and uses your account credits.
+              A token is checked when you run a brief. This team uses up to{" "}
+              {stages.length} xAI API calls per run and uses your account
+              credits.
             </p>
           </Dialog.Content>
         </Dialog.Portal>
@@ -663,7 +730,7 @@ export default function Office() {
               <p className={styles.help}>
                 {briefMode === "demo"
                   ? "Sample messages rehearse the desk visits. Connect Grok to get real answers to your brief."
-                  : "Six role-specific Grok calls work on your brief. No browsing, code execution, or external messages."}
+                  : `${stages.length} role-specific Grok calls work on your brief. No browsing, code execution, or external messages.`}
               </p>
               <label htmlFor="brief">The brief</label>
               <textarea
@@ -695,7 +762,7 @@ export default function Office() {
                 >
                   {briefMode === "demo"
                     ? "Rehearse the handoffs"
-                    : "Run Grok · up to 6 calls"}
+                    : `Run Grok · up to ${stages.length} calls`}
                   <Icon name="arrow" />
                 </button>
               </div>
@@ -732,6 +799,138 @@ export default function Office() {
                 : "In transit to the desk"}
             </Dialog.Description>
             <p className={styles.messageBody}>{message?.message}</p>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+      <Dialog.Root open={teamOpen} onOpenChange={setTeamOpen}>
+        <Dialog.Portal>
+          <Dialog.Overlay className={styles.overlay} />
+          <Dialog.Content className={`${styles.dialog} ${styles.teamDialog}`}>
+            <CloseButton />
+            <span className={styles.dialogKicker}>
+              An office shaped by your team
+            </span>
+            <Dialog.Title>Set up your team</Dialog.Title>
+            <Dialog.Description>
+              Add 1–12 teammates and choose their roles. The office changes size
+              and each department brings its own equipment. A coordinator gets a
+              private head office.
+            </Dialog.Description>
+            <form onSubmit={applyTeam}>
+              <div className={styles.editorRows}>
+                {editorDrafts.map((draft, index) => (
+                  <div className={styles.editorRow} key={draft.id}>
+                    <div>
+                      <label htmlFor={`name-${draft.id}`}>
+                        Teammate {index + 1}
+                      </label>
+                      <input
+                        id={`name-${draft.id}`}
+                        value={draft.name}
+                        maxLength={24}
+                        required
+                        onChange={(event) =>
+                          setEditorDrafts((items) =>
+                            items.map((item) =>
+                              item.id === draft.id
+                                ? { ...item, name: event.target.value }
+                                : item,
+                            ),
+                          )
+                        }
+                      />
+                    </div>
+                    <div>
+                      <label id={`role-${draft.id}`}>Role</label>
+                      <Select.Root
+                        value={draft.role}
+                        onValueChange={(value) =>
+                          setEditorDrafts((items) =>
+                            items.map((item) =>
+                              item.id === draft.id
+                                ? { ...item, role: value as BotRole }
+                                : item,
+                            ),
+                          )
+                        }
+                      >
+                        <Select.Trigger
+                          className={styles.roleSelect}
+                          aria-labelledby={`role-${draft.id}`}
+                        >
+                          <Select.Value />
+                          <span aria-hidden="true">⌄</span>
+                        </Select.Trigger>
+                        <Select.Portal>
+                          <Select.Content
+                            className={styles.selectContent}
+                            position="popper"
+                            sideOffset={4}
+                          >
+                            <Select.Viewport>
+                              {roles.map((role) => (
+                                <Select.Item
+                                  className={styles.selectItem}
+                                  value={role}
+                                  key={role}
+                                >
+                                  <Select.ItemText>{role}</Select.ItemText>
+                                </Select.Item>
+                              ))}
+                            </Select.Viewport>
+                          </Select.Content>
+                        </Select.Portal>
+                      </Select.Root>
+                    </div>
+                    <button
+                      type="button"
+                      className={styles.removeBot}
+                      disabled={editorDrafts.length <= 1}
+                      aria-label={`Remove teammate ${index + 1}`}
+                      onClick={() =>
+                        setEditorDrafts((items) =>
+                          items.filter((item) => item.id !== draft.id),
+                        )
+                      }
+                    >
+                      <Icon name="close" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                className={styles.addBot}
+                disabled={editorDrafts.length >= 12}
+                onClick={() =>
+                  setEditorDrafts((items) => [
+                    ...items,
+                    {
+                      id: `bot-${crypto.randomUUID()}`,
+                      name: `Teammate ${items.length + 1}`,
+                      role: "Generalist",
+                    },
+                  ])
+                }
+              >
+                <Icon name="plus" />
+                Add teammate <span>{editorDrafts.length} / 12</span>
+              </button>
+              <p className={styles.help}>
+                The coordinator is optional; choose at most one. Applying a team
+                starts a fresh demo and stops any active Grok run. Team setup
+                stays in this tab until refresh.
+              </p>
+              {teamError && (
+                <p role="alert" className={styles.teamError}>
+                  {teamError}
+                </p>
+              )}
+              <div className={styles.dialogActions}>
+                <Dialog.Close className={styles.secondary}>Cancel</Dialog.Close>
+                <button className={styles.primary}>Apply team</button>
+              </div>
+            </form>
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>

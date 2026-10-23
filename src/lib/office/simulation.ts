@@ -1,24 +1,15 @@
-import { botById, type BotId, type Point } from "./team";
+import { type Bot, type BotId, type Point } from "./team";
+import { walkingRoute } from "./layout";
 
 const WALK_SPEED = 2.6;
 const DESK_VISIT_MS = 1400;
 
-function aisleRoute(id: BotId, visiting = false): Point[] {
-  const home = botById(id).home;
-  const desk = visiting
-    ? {
-        x: home.x + (id === "fern" ? 0 : 0.8),
-        y: home.y + (id === "fern" ? 0.8 : 0),
-      }
-    : { ...home };
-  if (id === "fern")
-    return [desk, { x: desk.x, y: 14 }, { x: 7.5, y: 14 }, { x: 7.5, y: 7 }];
-  if (id === "kit") return [desk, { x: 17.7, y: desk.y }, { x: 17.7, y: 7 }];
-  return [desk, { x: desk.x, y: 7 }];
-}
-
-export function routeBetween(from: BotId, to: BotId): Point[] {
-  return [...aisleRoute(from), ...aisleRoute(to, true).reverse()];
+export function routeBetween(
+  from: BotId,
+  to: BotId,
+  roster?: readonly Bot[],
+): Point[] {
+  return walkingRoute(from, to, roster);
 }
 
 export type Trip = {
@@ -29,8 +20,12 @@ export type Trip = {
   visitRemaining: number;
 };
 
-export function createTrip(from: BotId, to: BotId): Trip {
-  const route = routeBetween(from, to);
+export function createTrip(
+  from: BotId,
+  to: BotId,
+  roster?: readonly Bot[],
+): Trip {
+  const route = routeBetween(from, to, roster);
   return {
     position: { ...route[0] },
     phase: "outbound",

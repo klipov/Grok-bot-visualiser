@@ -1,4 +1,10 @@
-import { isBotId, type BotId, type Handoff } from "../office/team";
+import {
+  isBotId,
+  team,
+  type Bot,
+  type BotId,
+  type Handoff,
+} from "../office/team";
 
 export type RunEvent =
   | { type: "working"; bot: BotId }
@@ -6,12 +12,12 @@ export type RunEvent =
   | { type: "complete"; summary: string }
   | { type: "error"; message: string };
 
-function parseEvent(line: string): RunEvent {
+function parseEvent(line: string, roster: readonly Bot[]): RunEvent {
   const value: unknown = JSON.parse(line);
   if (!value || typeof value !== "object" || !("type" in value))
     throw new Error("Invalid team update");
   const v = value as Record<string, unknown>;
-  if (v.type === "working" && isBotId(v.bot))
+  if (v.type === "working" && isBotId(v.bot, roster))
     return { type: "working", bot: v.bot };
   if (v.type === "complete" && typeof v.summary === "string")
     return { type: "complete", summary: v.summary };
@@ -21,8 +27,8 @@ function parseEvent(line: string): RunEvent {
     const h = v.handoff as Record<string, unknown>;
     if (
       typeof h.id === "string" &&
-      isBotId(h.from) &&
-      isBotId(h.to) &&
+      isBotId(h.from, roster) &&
+      isBotId(h.to, roster) &&
       h.from !== h.to &&
       typeof h.message === "string" &&
       h.source === "grok"
@@ -45,6 +51,7 @@ function parseEvent(line: string): RunEvent {
 export async function consumeEvents(
   stream: ReadableStream<Uint8Array>,
   onEvent: (event: RunEvent) => void,
+  roster: readonly Bot[] = team,
 ) {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
@@ -59,7 +66,7 @@ export async function consumeEvents(
       buffer = done ? "" : (lines.pop() ?? "");
       for (const line of lines) {
         if (!line.trim()) continue;
-        const event = parseEvent(line);
+        const event = parseEvent(line, roster);
         onEvent(event);
         if (event.type === "complete" || event.type === "error")
           terminal = true;

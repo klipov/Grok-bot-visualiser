@@ -907,3 +907,113 @@
     padding: 20px;
   }
 }
+.teamSetup {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  font-size: 13px;
+  padding: 10px 8px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+.teamSetup span {
+  color: var(--muted);
+  font:
+    11px "Space Mono",
+    monospace;
+}
+.header .connect {
+  margin-left: 0;
+}
+.teamDialog {
+  width: min(680px, calc(100vw - 32px));
+}
+.editorRows {
+  display: grid;
+  gap: 16px;
+}
+.editorRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px;
+  gap: 12px;
+  align-items: end;
+}
+.roleSelect {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid #cdd4c5;
+  background: #fffef9;
+  border-radius: 6px;
+  padding: 14px 12px;
+  font-size: 14px;
+}
+.removeBot {
+  display: grid;
+  place-content: center;
+  padding: 12px 4px;
+  margin-bottom: 4px;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+}
+.removeBot:hover:not(:disabled) {
+  background: #f4e6dc;
+}
+.addBot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 20px;
+  border: 1px dashed #b8c5ae;
+  background: #f2f5e9;
+  width: 100%;
+  padding: 12px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.addBot span {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+.teamError {
+  color: #814f3e !important;
+}
+@media (max-width: 520px) {
+  .header {
+    gap: 6px;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  .brand {
+    font-size: 14px;
+    gap: 4px;
+  }
+  .teamSetup {
+    font-size: 10px;
+    padding: 8px 2px;
+    gap: 4px;
+  }
+  .teamSetup span {
+    font-size: 9px;
+  }
+  .header .connect {
+    font-size: 10px;
+    padding: 8px 4px;
+    gap: 4px;
+  }
+  .editorRow {
+    gap: 8px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 24px;
+  }
+  .roleSelect {
+    font-size: 11px;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+}

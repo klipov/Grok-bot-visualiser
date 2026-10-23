@@ -1,4 +1,5 @@
 import { runTeam, validAccessToken, validBrief } from "@/lib/grok/run";
+import { botFromDraft, parseTeamDrafts, team } from "@/lib/office/team";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -62,6 +63,18 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   const abort = new AbortController();
+  const requestedTeam = (input as { team?: unknown }).team;
+  const drafts =
+    requestedTeam === undefined ? null : parseTeamDrafts(requestedTeam);
+  if (requestedTeam !== undefined && !drafts)
+    return Response.json(
+      {
+        error:
+          "Choose 1–12 teammates with unique IDs and at most one coordinator.",
+      },
+      { status: 400 },
+    );
+  const roster = drafts ? drafts.map(botFromDraft) : team;
   const signal = AbortSignal.any([
     request.signal,
     abort.signal,
@@ -72,6 +85,7 @@ export async function POST(request: Request) {
     key: process.env.XAI_API_KEY,
     model: process.env.XAI_MODEL || "grok-4.7",
     signal,
+    roster,
   });
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
