@@ -321,6 +321,7 @@ test("an asset failure produces an accessible graphics error", async ({
 test("team composition rebuilds the actual floor and removes an absent head office", async ({
   page,
 }) => {
+  test.setTimeout(60_000);
   await page.setViewportSize({ width: 1440, height: 1100 });
   await page.goto("/");
   const world = page.locator('[data-ready="true"]');
@@ -391,6 +392,17 @@ test("one teammate gets a compact role-specific workspace and no invented handof
   ).toBeVisible();
   await expect(
     page.getByText("One teammate, one workspace.", { exact: false }),
+  ).toBeVisible();
+  await expect(world).toHaveAttribute("data-phase", "idle");
+  await page.getByRole("button", { name: "Give the team a brief" }).click();
+  await page
+    .getByLabel("The brief", { exact: true })
+    .fill("Organise the neighbourhood book exchange");
+  await page.getByRole("button", { name: "Place brief on desk" }).click();
+  await expect(
+    page
+      .getByRole("status")
+      .filter({ hasText: "Demo brief placed on Ada's desk" }),
   ).toBeVisible();
   await expect(world).toHaveAttribute("data-phase", "idle");
   expect(

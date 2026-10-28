@@ -88,10 +88,15 @@ export async function* runTeam({
   for (let i = 0; i < stages.length; i++) {
     signal.throwIfAborted();
     const bot = stages[i];
-    const assignment =
-      i === stages.length - 1
-        ? "Bring the team's work into a useful final answer to the original brief. Clearly state remaining assumptions and next actions."
-        : assignments[bot.role];
+    let assignment = assignments[bot.role];
+    if (i === stages.length - 1) {
+      const synthesis =
+        "Bring the team's work into a useful final answer to the original brief. Clearly state remaining assumptions and next actions.";
+      assignment =
+        bot.role === "Coordinator" && i > 0
+          ? synthesis
+          : `${assignment} ${synthesis}`;
+    }
     yield { type: "working", bot: bot.id };
     signal.throwIfAborted();
     const response = await fetcher("https://api.x.ai/v1/responses", {

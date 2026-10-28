@@ -144,6 +144,103 @@ test("custom Grok teams call only their selected roles and do not invent a coord
   assert.equal(events.at(-1)?.type, "complete");
 });
 
+test("a singleton specialist retains its role instructions while producing the final answer", async () => {
+  for (const [role, instruction] of [
+    ["Analyst", "Compare the options"],
+    ["Librarian", "Do not invent references"],
+  ] as const) {
+    let calls = 0;
+    for await (const _event of runTeam({
+      brief: "Plan a community book exchange",
+      key: "key",
+      model: "test",
+      signal: new AbortController().signal,
+      roster: [botFromDraft({ id: "solo", name: "Ada", role })],
+      fetcher: async (_url, options) => {
+        calls++;
+        const prompt = JSON.parse(options!.body as string).input[0]
+          .content as string;
+        assert.ok(prompt.includes(instruction));
+        assert.ok(prompt.includes("useful final answer"));
+        return response("A specialist's final answer");
+      },
+    })) {
+      /* consume the single-role run */
+    }
+    assert.equal(calls, 1);
+  }
+});
+
+test("authenticated custom rosters reach the streamed decoder while invalid teams never reach billing", async () => {
+  const beforeKey = process.env.XAI_API_KEY;
+  const beforeToken = process.env.OFFICE_ACCESS_TOKEN;
+  const previousFetch = globalThis.fetch;
+  process.env.XAI_API_KEY = "test-key";
+  process.env.OFFICE_ACCESS_TOKEN = "office-secret";
+  const drafts = [
+    { id: "custom-ada", name: "Ada", role: "Librarian" as const },
+    { id: "custom-bea", name: "Bea", role: "Librarian" as const },
+  ];
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return response(`Custom note ${calls}`);
+  };
+  const request = (members: unknown) =>
+    new Request("http://localhost/api/grok/run", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer office-secret",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        brief: "Plan a community book exchange",
+        team: members,
+      }),
+    });
+  try {
+    for (const invalid of [
+      [drafts[0], drafts[0]],
+      Array.from({ length: 13 }, (_, i) => ({
+        id: `bot-${i}`,
+        name: "Bot",
+        role: "Generalist",
+      })),
+      [
+        { ...drafts[0], role: "Coordinator" },
+        { ...drafts[1], role: "Coordinator" },
+      ],
+    ])
+      assert.equal((await POST(request(invalid))).status, 400);
+    assert.equal(calls, 0);
+    const result = await POST(request(drafts));
+    assert.equal(result.status, 200);
+    const events: RunEvent[] = [];
+    await consumeEvents(
+      result.body!,
+      (event) => events.push(event),
+      drafts.map(botFromDraft),
+    );
+    assert.equal(calls, 2);
+    assert.deepEqual(
+      events
+        .filter((event) => event.type === "handoff")
+        .map((event) => [event.handoff.from, event.handoff.to]),
+      [["custom-ada", "custom-bea"]],
+    );
+    assert.deepEqual(events.at(-1), {
+      type: "complete",
+      summary: "Custom note 2",
+    });
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (beforeKey === undefined) delete process.env.XAI_API_KEY;
+    else process.env.XAI_API_KEY = beforeKey;
+    if (beforeToken === undefined) delete process.env.OFFICE_ACCESS_TOKEN;
+    else process.env.OFFICE_ACCESS_TOKEN = beforeToken;
+  }
+});
+
 test("cancelling a run prevents another provider call", async () => {
   const abort = new AbortController();
   let calls = 0;

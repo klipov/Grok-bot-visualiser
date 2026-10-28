@@ -84,6 +84,7 @@ export default function Office() {
   const [working, setWorking] = useState<BotId | null>(null);
   const [summary, setSummary] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [token, setToken] = useState("");
   const [tokenDraft, setTokenDraft] = useState("");
   const [connection, setConnection] = useState<{
@@ -140,6 +141,7 @@ export default function Office() {
     setHistory([]);
     setSummary("");
     setError("");
+    setNotice("");
     demoIndex.current = 0;
   }
 
@@ -185,10 +187,16 @@ export default function Office() {
     setSummary("");
     setError("");
     setPaused(false);
+    setNotice("");
     if (briefMode === "demo") {
       demoIndex.current = 1;
       setMode("demo");
       const rehearsal = demoHandoff(0, team);
+      setNotice(
+        rehearsal
+          ? ""
+          : `Demo brief placed on ${team[0].name}'s desk. Add a colleague to rehearse desk visits, or connect Grok for a real response.`,
+      );
       setQueue(
         rehearsal
           ? [
@@ -334,6 +342,11 @@ export default function Office() {
             </button>
           </div>
         )}
+        {notice && (
+          <div className={styles.sessionNotice} role="status">
+            {notice}
+          </div>
+        )}
 
         <div className={styles.officeGrid}>
           <section className={styles.worldPanel} aria-label="Office floor">
@@ -345,8 +358,8 @@ export default function Office() {
                 The main office
               </span>
               <span>
-                {team.length} desks <span className={styles.divider}>/</span>{" "}
-                plenty of ideas
+                {team.length} {team.length === 1 ? "desk" : "desks"}{" "}
+                <span className={styles.divider}>/</span> plenty of ideas
               </span>
             </div>
             <div className={styles.canvasArea} data-testid="office-world">
@@ -729,7 +742,9 @@ export default function Office() {
               </Tabs.Root>
               <p className={styles.help}>
                 {briefMode === "demo"
-                  ? "Sample messages rehearse the desk visits. Connect Grok to get real answers to your brief."
+                  ? team.length === 1
+                    ? "A lone teammate keeps the demo brief at their desk. Connect Grok to get a real response."
+                    : "Sample messages rehearse the desk visits. Connect Grok to get real answers to your brief."
                   : `${stages.length} role-specific Grok calls work on your brief. No browsing, code execution, or external messages.`}
               </p>
               <label htmlFor="brief">The brief</label>
@@ -761,7 +776,9 @@ export default function Office() {
                   }
                 >
                   {briefMode === "demo"
-                    ? "Rehearse the handoffs"
+                    ? team.length === 1
+                      ? "Place brief on desk"
+                      : "Rehearse the handoffs"
                     : `Run Grok · up to ${stages.length} calls`}
                   <Icon name="arrow" />
                 </button>

@@ -279,7 +279,6 @@ export function drawOffice(roster: readonly Bot[]): HTMLCanvasElement {
       line(p(x + 3.95, y + 5.12, 0), p(x + 3.95, y + 5.12, 28), "#c9a164", 3);
       line(p(x + 1.85, y + 5.12, 28), p(x + 3.95, y + 5.12, 28), "#e9c983", 3);
       plane(x + 1.85, y + 4.95, 2.1, 0.4, "#f8df97", 0.3);
-      text(x + 2.7, y + 0.25, 29, "HEAD OFFICE", "#637065", 9);
       board(x + 0.5, y + 0.45);
       for (let i = 0; i < 5; i++)
         cube(
@@ -300,6 +299,7 @@ export function drawOffice(roster: readonly Bot[]): HTMLCanvasElement {
       rect(cup.x - 4, cup.y - 5, 8, 6, "#f1cc64");
       rect(cup.x - 1, cup.y + 1, 2, 5, "#d9a548");
       plane(x + 3, y + 3.15, 0.8, 0.5, "#fff2cd", 16);
+      text(x + 2.7, y + 0.25, 40, "HEAD OFFICE", "#4a6657", 9);
     } else if (bot.role === "Librarian") {
       shelf(x + 0.3, y + 0.6, 4.4);
       shelf(x + 0.1, y + 2.1, 1.55);

@@ -292,6 +292,8 @@
   outline-offset: -4px;
 }
 .teamList {
+  max-height: 420px;
+  overflow-y: auto;
   padding: 8px 12px;
 }
 .botRow {
@@ -1016,4 +1018,14 @@
     padding-left: 8px;
     padding-right: 8px;
   }
+}
+.sessionNotice {
+  margin-bottom: 20px;
+  padding: 16px 20px;
+  color: #426952;
+  background: #edf1e4;
+  border: 1px solid #d6dfc8;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.7;
 }
