@@ -4,7 +4,6 @@ import dynamic from "next/dynamic";
 import { Dialog, Select, Tabs, Tooltip } from "radix-ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  team as sampleTeam,
   roles,
   parseTeamDrafts,
   workspaceRole,
@@ -15,6 +14,12 @@ import {
 } from "@/lib/office/team";
 import { createRoster } from "@/lib/office/layout";
 import { demoHandoff } from "@/lib/office/demo";
+import {
+  readSampleTeam,
+  saveSampleTeam,
+  starterDesks,
+  type SampleMember,
+} from "@/lib/office/sample-preferences";
 import {
   avatarStyles,
   avatarSpriteUrl,
@@ -67,8 +72,6 @@ function CloseButton() {
     </Dialog.Close>
   );
 }
-
-type SampleMember = Pick<TeamDraft, "id" | "name"> & DeskChoices;
 
 function sampleDraft(member: SampleMember): TeamDraft {
   return { ...member, role: member.role ?? workspaceRole(member.name) };
@@ -150,9 +153,13 @@ export default function Office() {
   const desktop = useDesktopOffice(watching);
   const [connectOpen, setConnectOpen] = useState(false);
   const [teamOpen, setTeamOpen] = useState(false);
-  const [demoDrafts, setDemoDrafts] = useState<SampleMember[]>(() =>
-    sampleTeam.map(({ id, name }) => ({ id, name })),
-  );
+  const [demoDrafts, setDemoDrafts] = useState<SampleMember[]>(starterDesks);
+  const [sampleStorageUnavailable, setSampleStorageUnavailable] =
+    useState(false);
+  const pendingSampleWrites = useRef(new Map<string, unknown>());
+  useEffect(() => {
+    setDemoDrafts(readSampleTeam());
+  }, []);
   const demoTeam = useMemo(
     () => createRoster(demoDrafts.map(sampleDraft)),
     [demoDrafts],
@@ -162,9 +169,18 @@ export default function Office() {
       new Map(demoDrafts.map(({ id, role, avatar }) => [id, { role, avatar }])),
     [demoDrafts],
   );
+  function applySampleChanges(members: SampleMember[]) {
+    const saved = saveSampleTeam(
+      demoDrafts,
+      members,
+      pendingSampleWrites.current,
+    );
+    setDemoDrafts(members);
+    setSampleStorageUnavailable(!saved);
+  }
   function customizeDemo(id: string, choice: DeskChoices) {
-    setDemoDrafts((members) =>
-      members.map((member) =>
+    applySampleChanges(
+      demoDrafts.map((member) =>
         member.id === id ? { id, name: member.name, ...choice } : member,
       ),
     );
@@ -188,7 +204,7 @@ export default function Office() {
       setTeamError("Check the names and roles on your sample team.");
       return;
     }
-    setDemoDrafts(
+    applySampleChanges(
       editorDrafts.map((member) => ({ ...member, name: member.name.trim() })),
     );
     setRevision((old) => old + 1);
@@ -294,6 +310,12 @@ export default function Office() {
             </button>
           )}
         </section>
+        {(watching ? desktop.storageUnavailable : sampleStorageUnavailable) && (
+          <p className={styles.error} role="status">
+            The browser couldn’t save your latest settings. They’re available in
+            this tab.
+          </p>
+        )}
         {desktop.error && watching && (
           <div className={styles.error} role="alert">
             <span>{desktop.error}</span>
@@ -426,7 +448,8 @@ export default function Office() {
                 Add teammate <span>{editorDrafts.length} / 12</span>
               </button>
               <p className={styles.help}>
-                Changes apply to the sample floor in this tab.
+                This browser remembers your sample teammates and their desk
+                settings.
               </p>
               {teamError && (
                 <p role="alert" className={styles.teamError}>

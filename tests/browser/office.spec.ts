@@ -4,8 +4,8 @@ import { createRoster, layoutOffice } from "../../src/lib/office/layout";
 import { officeMetrics, project } from "../../src/lib/office/art";
 
 // Only tests that install an explicit observer fixture can request desktop data.
-test.beforeEach(async ({ page }) => {
-  await page.route(/\/api\/grok\/|https:\/\/api\.x\.ai\//, async (route) => {
+test.beforeEach(async ({ context }) => {
+  await context.route(/\/api\/grok\/|https:\/\/api\.x\.ai\//, async (route) => {
     await route.abort();
     throw new Error(`Unexpected Grok request: ${route.request().url()}`);
   });
@@ -265,6 +265,144 @@ test("the desktop floor shows concurrent work, refreshes task labels in place an
   const readsAtDisconnect = reads;
   await page.waitForTimeout(6500);
   expect(reads).toBe(readsAtDisconnect);
+});
+
+test("a live desk remembers both choices after reload and an automatic department after reconnect", async ({
+  page,
+}) => {
+  let title = "Sales Lead";
+  const displayName = "Ada from the satellite office";
+  const task = "Review the private renewal proposal";
+  await page.route("**/api/grok/observe", (route) =>
+    route.fulfill({
+      json: { bots: [{ id: "r72", name: displayName, role: title, task }] },
+    }),
+  );
+  await page.goto("/");
+  await watchDesktop(page);
+  const ada = page.getByRole("button", { name: /^Ada/ });
+  const gender = page.getByRole("combobox", { name: "Avatar gender" });
+  const department = page.getByRole("combobox", { name: "Department" });
+  await ada.click();
+  await department.selectOption("Finance");
+  await gender.selectOption("masculine");
+
+  await page.reload();
+  await watchDesktop(page);
+  await expect(ada).toContainText("Finance");
+  await expect(ada.locator("[data-avatar]")).toHaveAttribute(
+    "data-avatar",
+    "masculine",
+  );
+  await ada.click();
+  await expect(department).toHaveValue("Finance");
+  await expect(gender).toHaveValue("masculine");
+  const { origins } = await page.context().storageState();
+  const stored = JSON.stringify(origins);
+  expect(stored).not.toContain(displayName);
+  expect(stored).not.toContain(task);
+
+  await department.selectOption("auto");
+  await page.getByRole("button", { name: "Disconnect" }).click();
+  title = "Support Lead";
+  await page.reload();
+  await watchDesktop(page);
+  await expect(ada).toContainText("Support");
+  await ada.click();
+  await expect(department).toHaveValue("auto");
+  await expect(gender).toHaveValue("masculine");
+});
+
+test("reopening the sample office restores each desk independently of a live bot with the same ID", async ({
+  page,
+  context,
+}) => {
+  await page.route("**/api/grok/observe", (route) =>
+    route.fulfill({
+      json: { bots: [{ id: "cathy", name: "Copywriting Cathy" }] },
+    }),
+  );
+  await page.goto("/");
+  const cathy = page.getByRole("button", { name: /^Copywriting Cathy/ });
+  const gender = page.getByRole("combobox", { name: "Avatar gender" });
+  const department = page.getByRole("combobox", { name: "Department" });
+  await cathy.click();
+  await gender.selectOption("neutral");
+  await department.selectOption("HR");
+  await page.getByRole("button", { name: /Edit sample team/ }).click();
+  const editor = page.getByRole("dialog", { name: "Edit the sample team" });
+  await editor.getByRole("button", { name: /Add teammate/ }).click();
+  await editor.getByRole("textbox").last().fill("Studio Quinn");
+  await editor
+    .getByRole("combobox", { name: "Avatar gender" })
+    .last()
+    .selectOption("feminine");
+  await editor
+    .getByRole("combobox", { name: "Department" })
+    .last()
+    .selectOption("Marketing");
+  await editor.getByRole("button", { name: "Apply team" }).click();
+
+  await watchDesktop(page);
+  await expect(page.getByText("Connected · Grok Bot desktop")).toBeVisible();
+  await cathy.click();
+  await expect(department).toHaveValue("auto");
+  await expect(gender).toHaveValue("auto");
+  await gender.selectOption("masculine");
+  await department.selectOption("Engineer");
+
+  await page.close();
+  const reopened = await context.newPage();
+  await reopened.goto("/");
+  await reopened.getByRole("button", { name: /^Copywriting Cathy/ }).click();
+  const reopenedGender = reopened.getByRole("combobox", {
+    name: "Avatar gender",
+  });
+  const reopenedDepartment = reopened.getByRole("combobox", {
+    name: "Department",
+  });
+  await expect(reopenedGender).toHaveValue("neutral");
+  await expect(reopenedDepartment).toHaveValue("HR");
+  await reopened.getByRole("button", { name: /^Studio Quinn/ }).click();
+  await expect(reopenedGender).toHaveValue("feminine");
+  await expect(reopenedDepartment).toHaveValue("Marketing");
+});
+
+test("blocked browser storage keeps desk choices usable in the current tab", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (this === window.localStorage) {
+        throw new DOMException("Storage is full", "QuotaExceededError");
+      }
+      setItem.call(this, key, value);
+    };
+  });
+  await page.route("**/api/grok/observe", (route) =>
+    route.fulfill({ json: { bots: [{ id: "b2", name: "Sales Lee" }] } }),
+  );
+  await page.goto("/");
+  const cathy = page.getByRole("button", { name: /^Copywriting Cathy/ });
+  const department = page.getByRole("combobox", { name: "Department" });
+  const gender = page.getByRole("combobox", { name: "Avatar gender" });
+  const notice = page.getByRole("status").filter({ hasText: /this tab/i });
+  await cathy.click();
+  await department.selectOption("Manager");
+  await expect(cathy).toContainText("Manager");
+  await expect(notice).toBeVisible();
+
+  await watchDesktop(page);
+  const lee = page.getByRole("button", { name: /^Sales Lee/ });
+  await lee.click();
+  await gender.selectOption("feminine");
+  await expect(notice).toBeVisible();
+  await page.getByRole("button", { name: "Disconnect" }).click();
+  await expect(cathy).toContainText("Manager");
+  await watchDesktop(page);
+  await lee.click();
+  await expect(gender).toHaveValue("feminine");
 });
 
 test("a group chat can be excluded from the floor across polls and restored", async ({
