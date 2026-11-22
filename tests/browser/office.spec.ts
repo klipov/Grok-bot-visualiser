@@ -288,7 +288,6 @@ test("a live desk remembers both choices after reload and an automatic departmen
   await gender.selectOption("masculine");
 
   await page.reload();
-  await watchDesktop(page);
   await expect(ada).toContainText("Finance");
   await expect(ada.locator("[data-avatar]")).toHaveAttribute(
     "data-avatar",
@@ -351,6 +350,7 @@ test("reopening the sample office restores each desk independently of a live bot
   await gender.selectOption("masculine");
   await department.selectOption("Engineer");
 
+  await page.getByRole("button", { name: "Disconnect" }).click();
   await page.close();
   const reopened = await context.newPage();
   await reopened.goto("/");
@@ -366,6 +366,58 @@ test("reopening the sample office restores each desk independently of a live bot
   await reopened.getByRole("button", { name: /^Studio Quinn/ }).click();
   await expect(reopenedGender).toHaveValue("feminine");
   await expect(reopenedDepartment).toHaveValue("Marketing");
+});
+
+test("a fresh tab reopens the connected team until the user disconnects", async ({
+  page,
+  context,
+}) => {
+  let reads = 0;
+  let name = "Original teammate";
+  let delayNextRoster: Promise<void> | undefined;
+  await context.route("**/api/grok/observe", async (route) => {
+    reads++;
+    await delayNextRoster;
+    await route.fulfill({ json: { bots: [{ id: "teammate", name }] } });
+  });
+  await page.goto("/");
+  await watchDesktop(page);
+  await expect(
+    page.getByRole("button", { name: /Original teammate/ }),
+  ).toBeVisible();
+  await page.close();
+
+  const previousReads = reads;
+  name = "Returning teammate";
+  const resumedRead = Promise.withResolvers<void>();
+  delayNextRoster = resumedRead.promise;
+  const reopened = await context.newPage();
+  await reopened.goto("/");
+  try {
+    await expect.poll(() => reads).toBe(previousReads + 1);
+    await expect(
+      reopened.getByRole("heading", { name: "Your team’s office" }),
+    ).toBeVisible();
+    await expect(
+      reopened.getByRole("heading", { name: "Inside the sample office" }),
+    ).toHaveCount(0);
+  } finally {
+    resumedRead.resolve();
+  }
+  await expect(
+    reopened.getByRole("button", { name: /Returning teammate/ }),
+  ).toBeVisible();
+  await reopened.getByRole("button", { name: "Disconnect" }).click();
+  await reopened.close();
+
+  const readsAfterDisconnect = reads;
+  const demo = await context.newPage();
+  await demo.goto("/");
+  await expect(
+    demo.getByRole("heading", { name: "Inside the sample office" }),
+  ).toBeVisible();
+  await expect(demo.locator("canvas")).toBeVisible();
+  expect(reads).toBe(readsAfterDisconnect);
 });
 
 test("blocked browser storage keeps desk choices usable in the current tab", async ({
@@ -463,19 +515,34 @@ test("an unreadable desktop clears stale work and retry handles an empty roster"
   page,
 }) => {
   test.setTimeout(45_000);
+  let reads = 0;
   let result: { bots: VisibleBot[] } | { error: string } = {
+    error: "Open the Grok Bot window.",
+  };
+  await page.route("**/api/grok/observe", (route) => {
+    reads++;
+    return route.fulfill({
+      status: "error" in result ? 503 : 200,
+      json: result,
+    });
+  });
+  await page.goto("/");
+  await watchDesktop(page);
+  const error = page.getByRole("main").getByRole("alert");
+  await expect(error).toContainText("Open the Grok Bot window.");
+  const failedReads = reads;
+  await page.reload();
+  await expect(page.locator("canvas")).toBeVisible();
+  expect(reads).toBe(failedReads);
+
+  result = {
     bots: [{ id: "a", name: "Local artist", task: "Design the cover" }],
   };
-  await page.route("**/api/grok/observe", (route) =>
-    route.fulfill({ status: "error" in result ? 503 : 200, json: result }),
-  );
-  await page.goto("/");
   await watchDesktop(page);
   await expect(
     page.getByRole("button", { name: /Local artist.*Design the cover/ }),
   ).toBeVisible();
   result = { error: "Open the Grok Bot window." };
-  const error = page.getByRole("main").getByRole("alert");
   await expect(error).toContainText("Open the Grok Bot window.", {
     timeout: 12_000,
   });
@@ -489,6 +556,8 @@ test("an unreadable desktop clears stale work and retry handles an empty roster"
   await expect(
     page.getByRole("heading", { name: "No activity reported" }),
   ).toBeVisible();
+  await page.reload();
+  await expect(error).toContainText("Open the Grok Bot window.");
   result = { bots: [] };
   await page.getByRole("button", { name: "Retry now" }).click();
   await expect(page.getByText("No bots visible on this floor")).toBeVisible();

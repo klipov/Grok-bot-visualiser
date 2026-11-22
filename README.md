@@ -39,7 +39,9 @@ For live desks, the browser saves your picks against an ID derived from the bot�
 2. In the office, choose **Connect Grok Bot** → **Watch desktop team**.
 3. Select a teammate to see their status. To show a current task title, open that bot's **Conversation details → Activity** in Grok Bot.
 
-Watching uses zero xAI API credits. The local server uses Windows UI Automation to read names and status labels such as **Working** and **Needs attention** from the open window. It checks again about six seconds after each read. Task details stay in memory. **Disconnect** stops the checks and takes you back to the demo.
+Once the office reads your team, you can close the tab. Reopen the same address in the same browser profile and it goes straight to your team and resumes checking Grok Bot. If Grok Bot is closed, the office keeps trying while the tab is open. Choose **Disconnect** to stop the checks and open on the sample team next time.
+
+Watching uses zero xAI API credits. The local server uses Windows UI Automation to read names and status labels such as **Working** and **Needs attention** from the open window. It checks again about six seconds after each read. Task details stay in memory.
 
 The reader understands Grok Bot's English desktop labels. It can only show what the app exposes. An unreported task shows up as **No activity shown**. Some versions of Grok Bot give group chats the same sidebar labels as bots. Use **Choose desks** to leave those chats off the floor.
 

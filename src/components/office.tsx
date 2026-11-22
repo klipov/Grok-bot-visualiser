@@ -14,6 +14,7 @@ import {
 } from "@/lib/office/team";
 import { createRoster } from "@/lib/office/layout";
 import { demoHandoff } from "@/lib/office/demo";
+import { readLocalValue, writeLocalValue } from "@/lib/office/desk-preferences";
 import {
   readSampleTeam,
   saveSampleTeam,
@@ -148,8 +149,13 @@ function DeskSettings({
   );
 }
 
+const resumeDesktopKey = "grok-bot-office.resume-desktop.v1";
+type OfficeView = "opening" | "sample" | "joining" | "desktop";
+
 export default function Office() {
-  const [watching, setWatching] = useState(false);
+  const [view, setView] = useState<OfficeView>("opening");
+  const watching = view === "joining" || view === "desktop";
+  const [viewSaveFailed, setViewSaveFailed] = useState(false);
   const desktop = useDesktopOffice(watching);
   const [connectOpen, setConnectOpen] = useState(false);
   const [teamOpen, setTeamOpen] = useState(false);
@@ -159,7 +165,19 @@ export default function Office() {
   const pendingSampleWrites = useRef(new Map<string, unknown>());
   useEffect(() => {
     setDemoDrafts(readSampleTeam());
+    setView(readLocalValue(resumeDesktopKey) === true ? "desktop" : "sample");
   }, []);
+  useEffect(() => {
+    if (view === "joining" && desktop.checkedAt) {
+      setViewSaveFailed(!writeLocalValue(resumeDesktopKey, true));
+      setView("desktop");
+    }
+  }, [view, desktop.checkedAt]);
+
+  function disconnect() {
+    setViewSaveFailed(!writeLocalValue(resumeDesktopKey, undefined));
+    setView("sample");
+  }
   const demoTeam = useMemo(
     () => createRoster(demoDrafts.map(sampleDraft)),
     [demoDrafts],
@@ -209,6 +227,16 @@ export default function Office() {
     );
     setRevision((old) => old + 1);
     setTeamOpen(false);
+  }
+
+  if (view === "opening") {
+    return (
+      <main className={styles.main}>
+        <p className={styles.loading} role="status">
+          Opening the office…
+        </p>
+      </main>
+    );
   }
 
   return (
@@ -294,10 +322,7 @@ export default function Office() {
             </p>
           </div>
           {watching ? (
-            <button
-              className={styles.secondary}
-              onClick={() => setWatching(false)}
-            >
+            <button className={styles.secondary} onClick={disconnect}>
               Disconnect
             </button>
           ) : (
@@ -310,7 +335,10 @@ export default function Office() {
             </button>
           )}
         </section>
-        {(watching ? desktop.storageUnavailable : sampleStorageUnavailable) && (
+        {(viewSaveFailed ||
+          (watching
+            ? desktop.storageUnavailable
+            : sampleStorageUnavailable)) && (
           <p className={styles.error} role="status">
             The browser couldn’t save your latest settings. They’re available in
             this tab.
@@ -349,8 +377,8 @@ export default function Office() {
               panel in Conversation details.
             </Dialog.Description>
             <p className={styles.help}>
-              Watching uses no xAI API credits. Manage your bots and their work
-              in Grok Bot.
+              This browser will reopen your team until you choose Disconnect.
+              Watching uses no xAI API credits.
             </p>
             <div className={styles.dialogActions}>
               <Dialog.Close className={styles.secondary}>Cancel</Dialog.Close>
@@ -358,7 +386,7 @@ export default function Office() {
                 className={styles.primary}
                 onClick={() => {
                   setConnectOpen(false);
-                  setWatching(true);
+                  setView("joining");
                 }}
               >
                 Watch desktop team
