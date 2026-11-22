@@ -1,11 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createRoster } from "@/lib/office/layout";
-import { workspaceRole, type Bot, type BotRole } from "@/lib/office/team";
+import { workspaceRole, type Bot } from "@/lib/office/team";
 import type { ObservedBot } from "@/lib/grok/observe";
+import { suggestAvatar } from "@/lib/office/avatar";
+import {
+  readChoices,
+  readLocalValue,
+  writeLocalValue,
+  type DeskChoices,
+} from "@/lib/office/desk-preferences";
 
-import { suggestAvatar, type AvatarStyle } from "@/lib/office/avatar";
+export type { DeskChoices } from "@/lib/office/desk-preferences";
 
-export type DeskChoices = { role?: BotRole; avatar?: AvatarStyle };
+const deskKey = (id: string) => `grok-bot-office.desktop-desk.v1.${id}`;
 
 type DesktopOffice = {
   team: Bot[];
@@ -24,6 +31,7 @@ export const emptyOffice: DesktopOffice = {
 export function updateOffice(
   previous: DesktopOffice,
   bots: ObservedBot[],
+  choices: ReadonlyMap<string, DeskChoices> = previous.choices,
 ): DesktopOffice {
   // Grok's sidebar can bring a recently active chat to the top.
   const newBots = new Map(bots.map((bot) => [bot.id, bot]));
@@ -37,10 +45,8 @@ export function updateOffice(
   }
   for (const bot of newBots.values()) ordered.push(bot);
 
-  const choices = new Map<string, DeskChoices>();
   const drafts = ordered.map(({ id, name, role }) => {
-    const choice = previous.choices.get(id);
-    if (choice) choices.set(id, choice);
+    const choice = choices.get(id);
     return {
       id,
       name,
@@ -103,6 +109,8 @@ export function customizeDesk(
 export function useDesktopOffice(enabled: boolean) {
   const [office, setOffice] = useState<DesktopOffice>(emptyOffice);
   const [attempt, setAttempt] = useState(0);
+  const [storageUnavailable, setStorageUnavailable] = useState(false);
+  const unsaved = useRef(new Map<string, DeskChoices>());
   const [hiddenDesks, setHiddenDesks] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -131,8 +139,15 @@ export function useDesktopOffice(enabled: boolean) {
               : "The desktop roster is unavailable.",
           );
         }
-        if (!controller.signal.aborted)
-          setOffice((old) => updateOffice(old, data.bots));
+        if (controller.signal.aborted) return;
+        const bots: ObservedBot[] = data.bots;
+        const choices = new Map<string, DeskChoices>();
+        for (const { id } of bots) {
+          const choice =
+            unsaved.current.get(id) ?? readChoices(readLocalValue(deskKey(id)));
+          if (choice.role || choice.avatar) choices.set(id, choice);
+        }
+        setOffice((old) => updateOffice(old, bots, choices));
       } catch (cause) {
         if (!controller.signal.aborted)
           setOffice((previous) => ({
@@ -182,8 +197,17 @@ export function useDesktopOffice(enabled: boolean) {
     allDesks: office.team,
     hiddenDesks,
     setDeskVisible,
+    storageUnavailable,
     retry: () => setAttempt((value) => value + 1),
-    customize: (id: string, choice: DeskChoices) =>
-      setOffice((previous) => customizeDesk(previous, id, choice)),
+    customize: (id: string, choice: DeskChoices) => {
+      const saved = writeLocalValue(
+        deskKey(id),
+        choice.role || choice.avatar ? choice : undefined,
+      );
+      if (saved) unsaved.current.delete(id);
+      else unsaved.current.set(id, choice);
+      setStorageUnavailable(unsaved.current.size > 0);
+      setOffice((previous) => customizeDesk(previous, id, choice));
+    },
   };
 }

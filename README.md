@@ -27,7 +27,11 @@ Open the local address printed in the terminal, usually [127.0.0.1:3000](http://
 
 Click a bot on the floor or in the roster. **Department** controls the room and its furniture. The office starts with a department suggested by a visible job title or the bot's name. For example, “Sales Manager Sam” gets a sales desk. An unrecognised title gets a general workspace.
 
-**Avatar gender** controls the character on the floor and its portrait in the roster. A local list of names suggests the starting look. Cathy and Marg get female avatars. Shared names such as Sam and unfamiliar names start with a neutral avatar. You can choose **Female**, **Male**, or **Neutral** yourself. Both settings have an **Automatic** option and apply only to this office session.
+**Avatar gender** controls the character on the floor and its portrait in the roster. A local list of names suggests the starting look. Cathy and Marg get female avatars. Shared names such as Sam and unfamiliar names start with a neutral avatar. You can choose **Female**, **Male**, or **Neutral** yourself.
+
+The office remembers each bot’s department and avatar when you reopen the same address in the same browser profile. Choose **Automatic** on either setting to use the current suggestion again. The other setting keeps your pick. Your edited sample team is saved separately from your connected team.
+
+For live desks, the browser saves your picks against an ID derived from the bot’s displayed name. If you rename a bot, you may need to set up its desk again. Bots with identical names can also change IDs when Grok restarts. If you switch Grok accounts in the same browser profile, a bot with the same name can inherit the saved desk.
 
 ## Watch your team on Windows
 

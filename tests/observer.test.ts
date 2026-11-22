@@ -99,7 +99,7 @@ test("sidebar reordering updates visible activity without moving occupied desks"
   assert.equal(first.activity.size, 0);
 });
 
-test("a session workspace changes the room immediately and expires when a bot leaves", () => {
+test("manual desk choices survive a bot leaving and returning with a new job title", () => {
   const bot = {
     id: "s",
     name: "Sam",
@@ -123,10 +123,14 @@ test("a session workspace changes the room immediately and expires when a bot le
   assert.equal(refreshed.activity.get("s"), "Draft copy");
   assert.equal(customizeDesk(refreshed, "s", {}).team[0].role, "Copywriter");
   const departed = updateOffice(refreshed, []);
-  assert.equal(departed.choices.size, 0);
   assert.equal(departed.activity.size, 0);
   assert.equal(customizeDesk(departed, "s", { role: "Designer" }), departed);
-  assert.equal(updateOffice(departed, [bot]).team[0].role, "Sales");
+  const returned = updateOffice(departed, [{ ...bot, role: "Finance" }]);
+  assert.equal(returned.team[0].role, "Sales");
+  assert.equal(returned.team[0].avatar, "feminine");
+  const reset = customizeDesk(returned, "s", { avatar: "feminine" });
+  assert.equal(reset.team[0].role, "Finance");
+  assert.equal(reset.team[0].avatar, "feminine");
 });
 
 test(
