@@ -2,7 +2,7 @@ name: Check the office
 
 on:
   push:
-    branches: [main, codex/pixel-office]
+    branches: [main]
   pull_request:
 
 jobs:
@@ -28,3 +28,19 @@ jobs:
         with:
           name: browser-test-results
           path: test-results/
+
+  macos-demo:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    env:
+      NEXT_TELEMETRY_DISABLED: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install chromium
+      - run: npm run test:e2e -- --grep @platform

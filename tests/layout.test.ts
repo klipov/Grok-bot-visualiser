@@ -5,7 +5,21 @@ import {
   layoutOffice,
   walkingRoute,
 } from "../src/lib/office/layout";
-import type { TeamDraft } from "../src/lib/office/team";
+import { team, type TeamDraft } from "../src/lib/office/team";
+
+test("the sample has a writing desk, sales desk and manager's office", () => {
+  const roster = createRoster(team);
+  assert.deepEqual(
+    layoutOffice(roster).stations.map(({ bot, privateOffice }) => [
+      bot.name, bot.role, privateOffice,
+    ]),
+    [
+      ["Manager Marg", "Manager", true],
+      ["Copywriting Cathy", "Copywriter", false],
+      ["Sales Sam", "Sales", false],
+    ],
+  );
+});
 
 const drafts = (count: number): TeamDraft[] =>
   Array.from({ length: count }, (_, i) => ({
@@ -29,7 +43,7 @@ test("the office grows with its roster and creates no spare departments", () => 
   }
 });
 
-test("a head office belongs only to an actual coordinator", () => {
+test("a coordinator gets a private office and an unled team uses open desks", () => {
   const roster = createRoster([
     { id: "reader", name: "Reader", role: "Librarian" },
     { id: "lead", name: "Lead", role: "Coordinator" },

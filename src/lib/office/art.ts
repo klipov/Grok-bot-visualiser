@@ -18,17 +18,6 @@ export function project(point: Point, layout: OfficeLayout, z = 0): Point {
   };
 }
 
-export const spriteForRole: Record<BotRole, string> = {
-  Coordinator: "atlas",
-  Researcher: "mira",
-  Librarian: "fern",
-  Engineer: "kit",
-  Outreach: "reed",
-  Designer: "designer",
-  Analyst: "analyst",
-  Generalist: "generalist",
-};
-
 export function drawOffice(roster: readonly Bot[]): HTMLCanvasElement {
   const layout = layoutOffice(roster);
   const metrics = officeMetrics(layout);
@@ -239,6 +228,9 @@ export function drawOffice(roster: readonly Bot[]): HTMLCanvasElement {
   function room(station: Station) {
     const { bot, x, y, privateOffice } = station;
     const rugs: Record<BotRole, [string, string]> = {
+      Manager: ["#ada0ed", "#8172c5"],
+      Copywriter: ["#a6debd", "#6ba887"],
+      Sales: ["#ffb18a", "#e38073"],
       Coordinator: ["#ada0ed", "#8172c5"],
       Researcher: ["#86ddce", "#46a4aa"],
       Librarian: ["#c3e58c", "#8bac5c"],
@@ -246,6 +238,11 @@ export function drawOffice(roster: readonly Bot[]): HTMLCanvasElement {
       Outreach: ["#ffb18a", "#e38073"],
       Designer: ["#eeb7d5", "#c887b3"],
       Analyst: ["#f3d68b", "#c3a757"],
+      HR: ["#f1c8ad", "#ca947d"],
+      Finance: ["#b3d6a9", "#759e76"],
+      Support: ["#afdce9", "#76a8bb"],
+      Marketing: ["#f5b9a7", "#c68b8b"],
+      Operations: ["#dbcca9", "#a99877"],
       Generalist: ["#b3d6b7", "#7ea687"],
     };
     const [fill, edge] = rugs[bot.role];
@@ -300,6 +297,19 @@ export function drawOffice(roster: readonly Bot[]): HTMLCanvasElement {
       rect(cup.x - 1, cup.y + 1, 2, 5, "#d9a548");
       plane(x + 3, y + 3.15, 0.8, 0.5, "#fff2cd", 16);
       text(x + 2.7, y + 0.25, 40, "HEAD OFFICE", "#4a6657", 9);
+    } else if (bot.role === "Copywriter") {
+      shelf(x + 0.4, y + 0.6, 2.9);
+      desk(x + 0.9, y + 2.4, "#eac694", 3.8);
+      monitor(x + 1.2, y + 2.5);
+      books(x + 3.8, y + 2.6, 3, 16);
+      plane(x + 2.6, y + 3.1, 1.1, 0.75, "#fff5da", 17);
+      for (let i = 0; i < 3; i++)
+        line(
+          p(x + 2.72, y + 3.23 + i * 0.17, 17),
+          p(x + 3.42, y + 3.23 + i * 0.17, 17),
+          "#8a9997",
+        );
+      line(p(x + 3.65, y + 3.15, 17), p(x + 3.9, y + 3.7, 17), "#b5544d", 2);
     } else if (bot.role === "Librarian") {
       shelf(x + 0.3, y + 0.6, 4.4);
       shelf(x + 0.1, y + 2.1, 1.55);
@@ -354,7 +364,7 @@ export function drawOffice(roster: readonly Bot[]): HTMLCanvasElement {
         5,
       );
       rect(a.x - 10, a.y - 6, 14, 3, "#8ab4bc");
-    } else if (bot.role === "Outreach") {
+    } else if (bot.role === "Outreach" || bot.role === "Sales") {
       board(x + 0.6, y + 0.6, "#c99872");
       for (let i = 0; i < 6; i++)
         cube(
@@ -468,6 +478,105 @@ export function drawOffice(roster: readonly Bot[]): HTMLCanvasElement {
           "#c4b891",
         );
       cube(x + 4.5, y + 0.9, 0.6, 0.8, 10, "#c2a46e", "#997852", "#b28d5d");
+    } else if (bot.role === "HR") {
+      // A meeting nook with a settee and a low coffee table.
+      cube(x + 0.5, y + 0.8, 2.9, 0.35, 18, "#de9b83", "#be7f74", "#c78e79");
+      for (let i = 0; i < 2; i++)
+        cube(
+          x + 0.5 + i * 1.45,
+          y + 1.15,
+          1.4,
+          0.85,
+          8,
+          "#edb598",
+          "#c28e7b",
+          "#daa389",
+        );
+      cube(x + 1.2, y + 2.4, 1.6, 0.8, 8, "#f1d4a7", "#b88165", "#cea283");
+      books(x + 1.4, y + 2.55, 2, 8);
+      desk(x + 3.5, y + 1.4, "#e2b690", 1.55);
+      monitor(x + 3.55, y + 1.5);
+    } else if (bot.role === "Finance") {
+      shelf(x + 0.5, y + 0.55, 2.5);
+      desk(x + 0.9, y + 2.45, "#d6bd91", 3.7);
+      // An open ledger and a calculator with a green LCD.
+      plane(x + 1.15, y + 2.65, 1.85, 1.0, "#fff3cd", 17);
+      line(p(x + 2.05, y + 2.65, 17), p(x + 2.05, y + 3.65, 17), "#c0aa85");
+      for (let i = 0; i < 3; i++)
+        line(
+          p(x + 1.3, y + 2.9 + i * 0.25, 17),
+          p(x + 2.86, y + 2.9 + i * 0.25, 17),
+          "#b5beb0",
+        );
+      cube(
+        x + 3.3,
+        y + 2.75,
+        0.85,
+        0.9,
+        2,
+        "#536e6b",
+        "#395552",
+        "#45625c",
+        16,
+      );
+      plane(x + 3.4, y + 2.84, 0.63, 0.22, "#b8dba0", 18);
+      for (let i = 0; i < 6; i++)
+        plane(
+          x + 3.44 + (i % 3) * 0.2,
+          y + 3.18 + Math.floor(i / 3) * 0.18,
+          0.12,
+          0.1,
+          "#ecdfba",
+          18,
+        );
+    } else if (bot.role === "Support") {
+      desk(x + 0.9, y + 2.2, "#ccdee1", 3.8);
+      monitor(x + 1.15, y + 2.3);
+      const hook = p(x + 3.65, y + 2.65, 28);
+      rect(hook.x - 1, hook.y - 4, 2, 17, "#668491");
+      pen!.beginPath();
+      pen!.arc(hook.x, hook.y, 6, Math.PI, 2 * Math.PI);
+      pen!.lineWidth = 3;
+      pen!.strokeStyle = "#45566d";
+      pen!.stroke();
+      rect(hook.x - 8, hook.y - 1, 5, 7, "#58859c");
+      rect(hook.x + 3, hook.y - 1, 5, 7, "#58859c");
+      line(
+        { x: hook.x + 6, y: hook.y + 5 },
+        { x: hook.x, y: hook.y + 9 },
+        "#45566d",
+        2,
+      );
+    } else if (bot.role === "Marketing") {
+      board(x + 0.55, y + 0.55, "#fdf0cb");
+      // Three campaign proofs pinned to the wall.
+      for (const [i, ink] of ["#c87177", "#63a6ab", "#d6a452"].entries()) {
+        const left = x + 0.83 + i * 0.9;
+        cube(left, y + 0.8, 0.68, 0.03, 12, ink, ink, ink, 8);
+        line(
+          p(left + 0.13, y + 0.85, 16),
+          p(left + 0.54, y + 0.85, 16),
+          "#fff1ce",
+          2,
+        );
+      }
+      desk(x + 1.15, y + 2.45, "#efbf93", 3.6);
+      monitor(x + 1.4, y + 2.55);
+      plane(x + 3, y + 2.8, 1.15, 0.8, "#fff4d9", 17);
+      plane(x + 3.14, y + 2.94, 0.55, 0.48, "#d9818f", 17);
+    } else if (bot.role === "Operations") {
+      desk(x + 0.55, y + 2.35, "#d8b58a", 2.7);
+      monitor(x + 0.75, y + 2.45);
+      // Cartons grouped by the packing desk, with a strip of tape across each lid.
+      for (const [dx, dy, z] of [
+        [3.1, 1.0, 0],
+        [4.2, 1.0, 0],
+        [3.1, 1.0, 9],
+        [3.6, 2.1, 0],
+      ]) {
+        cube(x + dx, y + dy, 1, 1, 9, "#dcba85", "#ad845f", "#c69a6e", z);
+        plane(x + dx + 0.4, y + dy, 0.18, 1, "#f0d7a3", z + 9);
+      }
     } else {
       desk(x + 1.1, y + 2.4, "#efc087", 3.4);
       monitor(x + 1.35, y + 2.5);
@@ -475,9 +584,12 @@ export function drawOffice(roster: readonly Bot[]): HTMLCanvasElement {
       cube(x + 0.6, y + 0.8, 1.1, 0.8, 9, "#b0cebb", "#78a28b", "#95b8a0");
       plant(x + 0.85, y + 0.95);
     }
-    if (bot.role !== "Coordinator" && bot.role !== "Librarian")
-      plant(x + 4.65, y + 3.8);
-    const label = privateOffice ? `${bot.name}'s office` : bot.role;
+    if (!privateOffice && bot.role !== "Librarian") plant(x + 4.65, y + 3.8);
+    const label = privateOffice
+      ? "Private office"
+      : bot.role === "Generalist"
+        ? "Workspace"
+        : bot.role;
     text(x + 2.7, y + 5.2, 0, label, "#4c6c70", 8);
   }
 

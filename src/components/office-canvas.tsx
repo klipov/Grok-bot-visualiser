@@ -2,15 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Texture as PixiTexture } from "pixi.js";
-import {
-  drawOffice,
-  officeMetrics,
-  project,
-  spriteForRole,
-} from "@/lib/office/art";
+import { drawOffice, officeMetrics, project } from "@/lib/office/art";
+import { avatarSpriteUrl } from "@/lib/office/avatar";
 import { layoutOffice } from "@/lib/office/layout";
 import { advanceTrip, createTrip, type Trip } from "@/lib/office/simulation";
-import { type OfficeCanvasProps } from "@/lib/office/team";
+import { hasPrivateOffice, type OfficeCanvasProps } from "@/lib/office/team";
 import styles from "./office-canvas.module.css";
 
 export default function OfficeCanvas(props: OfficeCanvasProps) {
@@ -84,7 +80,7 @@ export default function OfficeCanvas(props: OfficeCanvasProps) {
       };
       const textures = await Promise.all(
         roster.map((bot) =>
-          Assets.load<PixiTexture>(`/office/${spriteForRole[bot.role]}.png`),
+          Assets.load<PixiTexture>(avatarSpriteUrl(bot.avatar)),
         ),
       );
       if (cancelled) return;
@@ -119,7 +115,7 @@ export default function OfficeCanvas(props: OfficeCanvasProps) {
         sprite.anchor.set(15 / 32, 35 / 40);
         container.addChild(sprite);
         const name = new Text({
-          text: bot.name,
+          text: bot.name.length > 22 ? `${bot.name.slice(0, 21)}…` : bot.name,
           style: {
             fontFamily: "monospace",
             fontSize: 8,
@@ -134,12 +130,34 @@ export default function OfficeCanvas(props: OfficeCanvasProps) {
           .roundRect(-name.width / 2 - 4, 6, name.width + 8, 13, 2)
           .fill({ color: 0xfff8df, alpha: 0.94 });
         container.addChild(namePlate, name);
+        const activityBadge = new Container();
+        const activityPanel = new Graphics();
+        const activityText = new Text({
+          text: "",
+          style: { fontFamily: "monospace", fontSize: 8, fill: 0xffffff },
+          resolution: 2,
+        });
+        activityText.anchor.set(0.5);
+        activityBadge.position.set(0, -39);
+        activityBadge.visible = false;
+        activityBadge.addChild(activityPanel, activityText);
+        container.addChild(activityBadge);
         container.eventMode = "static";
         container.cursor = "pointer";
         container.hitArea = new Rectangle(-14, -35, 28, 54);
         container.on("pointertap", () => live.current.onSelect(bot.id));
         characters.addChild(container);
-        return { bot, container, sprite, frames, ring, namePlate };
+        return {
+          bot,
+          container,
+          sprite,
+          frames,
+          ring,
+          namePlate,
+          activityBadge,
+          activityPanel,
+          activityText,
+        };
       });
 
       const bubble = new Container();
@@ -167,6 +185,7 @@ export default function OfficeCanvas(props: OfficeCanvasProps) {
       let trip: Trip | null = null;
       let handoffId: string | null = null;
       let elapsed = 0;
+      let previousActivity: OfficeCanvasProps["activity"];
       const resize = () => {
         const width = host.clientWidth;
         const height = host.clientHeight;
@@ -197,6 +216,29 @@ export default function OfficeCanvas(props: OfficeCanvasProps) {
       app.ticker.add((ticker) => {
         const current = live.current;
         if (current.roster !== roster) return;
+        if (current.activity !== previousActivity) {
+          previousActivity = current.activity;
+          for (const {
+            bot,
+            activityBadge,
+            activityPanel,
+            activityText,
+          } of bots) {
+            const label = current.activity
+              ?.get(bot.id)
+              ?.trim()
+              .replace(/\s+/g, " ");
+            activityBadge.visible = Boolean(label);
+            if (!label) continue;
+            activityText.text =
+              label.length > 18 ? `${label.slice(0, 17)}…` : label;
+            const width = activityText.width + 10;
+            activityPanel
+              .clear()
+              .roundRect(-width / 2, -7, width, 14, 3)
+              .fill(0x304f56);
+          }
+        }
         const handoff = current.handoff;
         if ((handoff?.id ?? null) !== handoffId) {
           handoffId = handoff?.id ?? null;
@@ -293,7 +335,7 @@ export default function OfficeCanvas(props: OfficeCanvasProps) {
     <div
       className={styles.host}
       role="group"
-      aria-label={`Isometric pixel office with ${props.roster.length} role-specific departments${props.roster.some((bot) => bot.role === "Coordinator") ? " and a private head office" : ""}. Teammates walk to one another's desks to deliver messages.`}
+      aria-label={`Isometric office with ${props.roster.length} desks${props.roster.some((bot) => hasPrivateOffice(bot.role)) ? ", including a private office" : ""}.`}
     >
       <div ref={hostRef} className={styles.surface} />
       {status ? (
