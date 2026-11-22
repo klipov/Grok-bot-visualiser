@@ -1,5 +1,6 @@
 import {
   botFromDraft,
+  hasPrivateOffice,
   team,
   type Bot,
   type BotId,
@@ -35,7 +36,7 @@ function dimensions(count: number) {
 export function createRoster(drafts: readonly TeamDraft[]): Bot[] {
   const ordered = [...drafts].sort(
     (a, b) =>
-      Number(b.role === "Coordinator") - Number(a.role === "Coordinator"),
+      Number(hasPrivateOffice(b.role)) - Number(hasPrivateOffice(a.role)),
   );
   const { columns } = dimensions(ordered.length);
   return ordered.map((draft, index) => ({
@@ -64,7 +65,7 @@ export function layoutOffice(
       width: 5.5,
       depth: 5.1,
       aisleY: 1 + Math.floor(index / columns) * ROW_HEIGHT + 5.9,
-      privateOffice: bot.role === "Coordinator",
+      privateOffice: hasPrivateOffice(bot.role),
     })),
   };
 }

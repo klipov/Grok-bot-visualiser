@@ -4,8 +4,51 @@ import {
   botFromDraft,
   parseTeamDrafts,
   executionOrder,
+  workspaceRole,
 } from "../src/lib/office/team";
 import { demoHandoff } from "../src/lib/office/demo";
+
+test("the reported title or bot name chooses the office furniture", () => {
+  assert.equal(workspaceRole("Copywriting Cathy"), "Copywriter");
+  assert.equal(workspaceRole("Sam", "Sales"), "Sales");
+  assert.equal(workspaceRole("Manager Marg"), "Manager");
+  assert.equal(workspaceRole("Sales Sam", "Product Designer"), "Designer");
+  assert.equal(workspaceRole("Penn", "Poet"), "Generalist");
+  assert.equal(workspaceRole("Writerly"), "Generalist");
+});
+
+test("department names and job titles take precedence over generic management roles", () => {
+  const examples = [
+    ["HRHannah", "Generalist", "HR"],
+    ["Helen", "People Operations Manager", "HR"],
+    ["Fran", "Accounts Payable Coordinator", "Finance"],
+    ["Sofia", "Customer Success Manager", "Support"],
+    ["Social-Media-Sam", "Assistant", "Marketing"],
+    ["Ollie", "Head of Logistics", "Operations"],
+    ["Ellen", "Engineering Manager", "Engineer"],
+    ["Designer Dee", "Manager", "Designer"],
+    ["Richard", "Research Coordinator", "Researcher"],
+    ["Sales_Sam", "Custom bot", "Sales"],
+    ["Sam", "Account Executive", "Sales"],
+    ["Sandy", "Director", "Manager"],
+  ];
+  for (const [name, title, department] of examples) {
+    assert.equal(workspaceRole(name, title), department, name);
+  }
+});
+
+test("sample team drafts accept an avatar choice and choose a default when omitted", () => {
+  const draft = {
+    id: "c",
+    name: "Copywriting Cathy",
+    role: "Copywriter",
+  } as const;
+  assert.equal(botFromDraft(draft).avatar, "feminine");
+  const chosen = { ...draft, avatar: "neutral" } as const;
+  assert.deepEqual(parseTeamDrafts([chosen]), [chosen]);
+  assert.equal(botFromDraft(chosen).avatar, "neutral");
+  assert.equal(parseTeamDrafts([{ ...draft, avatar: "unknown" }]), null);
+});
 
 test("team input accepts repeated roles and an optional lead, but rejects ambiguous rosters", () => {
   const members = [

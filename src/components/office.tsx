@@ -4,19 +4,24 @@ import dynamic from "next/dynamic";
 import { Dialog, Select, Tabs, Tooltip } from "radix-ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  botById as lookupBot,
-  team as defaultTeam,
+  team as sampleTeam,
   roles,
   parseTeamDrafts,
-  executionOrder,
+  workspaceRole,
+  type Bot,
   type BotRole,
   type TeamDraft,
-  type BotId,
   type Handoff,
 } from "@/lib/office/team";
 import { createRoster } from "@/lib/office/layout";
 import { demoHandoff } from "@/lib/office/demo";
-import { consumeEvents } from "@/lib/grok/protocol";
+import {
+  avatarStyles,
+  avatarSpriteUrl,
+  suggestAvatar,
+  type AvatarStyle,
+} from "@/lib/office/avatar";
+import { useDesktopOffice, type DeskChoices } from "./use-desktop-office";
 import styles from "./office.module.css";
 
 const OfficeCanvas = dynamic(() => import("./office-canvas"), {
@@ -63,213 +68,131 @@ function CloseButton() {
   );
 }
 
+type SampleMember = Pick<TeamDraft, "id" | "name"> & DeskChoices;
+
+function sampleDraft(member: SampleMember): TeamDraft {
+  return { ...member, role: member.role ?? workspaceRole(member.name) };
+}
+
+const avatarLabels: Record<AvatarStyle, string> = {
+  feminine: "Female",
+  masculine: "Male",
+  neutral: "Neutral",
+};
+
+function DeskSettings({
+  name,
+  jobTitle,
+  choice = {},
+  onChange,
+}: {
+  name: string;
+  jobTitle?: string;
+  choice?: DeskChoices;
+  onChange: (choice: DeskChoices) => void;
+}) {
+  return (
+    <>
+      <label className={styles.deskPicker}>
+        Department
+        <select
+          value={choice.role ?? "auto"}
+          onChange={(event) =>
+            onChange({
+              ...choice,
+              role:
+                event.target.value === "auto"
+                  ? undefined
+                  : (event.target.value as BotRole),
+            })
+          }
+        >
+          <option value="auto">
+            Automatic · {workspaceRole(name, jobTitle)}
+          </option>
+          {roles.map((role) => (
+            <option key={role} value={role}>
+              {role}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className={styles.deskPicker}>
+        Avatar gender
+        <select
+          value={choice.avatar ?? "auto"}
+          onChange={(event) =>
+            onChange({
+              ...choice,
+              avatar:
+                event.target.value === "auto"
+                  ? undefined
+                  : (event.target.value as AvatarStyle),
+            })
+          }
+        >
+          <option value="auto">
+            Automatic · {avatarLabels[suggestAvatar(name)]}
+          </option>
+          {avatarStyles.map((style) => (
+            <option key={style} value={style}>
+              {avatarLabels[style]}
+            </option>
+          ))}
+        </select>
+      </label>
+    </>
+  );
+}
+
 export default function Office() {
-  const [teamDrafts, setTeamDrafts] = useState<TeamDraft[]>(() =>
-    defaultTeam.map(({ id, name, role }) => ({ id, name, role })),
-  );
-  const team = useMemo(() => createRoster(teamDrafts), [teamDrafts]);
-  const botById = (id: BotId) => lookupBot(id, team);
-  const stages = executionOrder(team);
-  const finalBot = stages.at(-1)!;
-  const [teamOpen, setTeamOpen] = useState(false);
-  const [editorDrafts, setEditorDrafts] = useState<TeamDraft[]>([]);
-  const [teamError, setTeamError] = useState("");
-  const [queue, setQueue] = useState<Handoff[]>([]);
-  const [history, setHistory] = useState<Handoff[]>([]);
-  const [selected, setSelected] = useState<BotId | null>(null);
-  const [paused, setPaused] = useState(false);
-  const [speed, setSpeed] = useState("1");
-  const [mode, setMode] = useState<"demo" | "grok">("demo");
-  const [running, setRunning] = useState(false);
-  const [working, setWorking] = useState<BotId | null>(null);
-  const [summary, setSummary] = useState("");
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [token, setToken] = useState("");
-  const [tokenDraft, setTokenDraft] = useState("");
-  const [connection, setConnection] = useState<{
-    configured: boolean;
-    model: string;
-  } | null>(null);
+  const [watching, setWatching] = useState(false);
+  const desktop = useDesktopOffice(watching);
   const [connectOpen, setConnectOpen] = useState(false);
-  const [briefOpen, setBriefOpen] = useState(false);
-  const [brief, setBrief] = useState("");
-  const [briefMode, setBriefMode] = useState("demo");
-  const [message, setMessage] = useState<Handoff | null>(null);
-  const demoIndex = useRef(0);
-  const controller = useRef<AbortController | null>(null);
-  const current = queue[0] ?? null;
-  const inspected = selected ? botById(selected) : null;
-  const inTransit = current && !history.some((h) => h.id === current.id);
-
-  useEffect(() => () => controller.current?.abort(), []);
-
-  useEffect(() => {
-    if (mode !== "demo" || queue.length || paused || team.length < 2) return;
-    const timer = setTimeout(() => {
-      const next = demoHandoff(demoIndex.current++, team);
-      if (next) setQueue((items) => (items.length ? items : [next]));
-    }, 900);
-    return () => clearTimeout(timer);
-  }, [mode, queue.length, paused, team]);
-
-  const delivered = useCallback(
-    (id: string) => {
-      const item = queue.find((h) => h.id === id);
-      if (item)
-        setHistory((previous) =>
-          previous.some((h) => h.id === id)
-            ? previous
-            : [...previous, item].slice(-60),
-        );
-    },
-    [queue],
+  const [teamOpen, setTeamOpen] = useState(false);
+  const [demoDrafts, setDemoDrafts] = useState<SampleMember[]>(() =>
+    sampleTeam.map(({ id, name }) => ({ id, name })),
   );
-  const settled = useCallback(
-    (id: string) => setQueue((items) => items.filter((h) => h.id !== id)),
-    [],
+  const demoTeam = useMemo(
+    () => createRoster(demoDrafts.map(sampleDraft)),
+    [demoDrafts],
   );
-
-  function restartDemo() {
-    controller.current?.abort();
-    controller.current = null;
-    setRunning(false);
-    setWorking(null);
-    setMode("demo");
-    setPaused(false);
-    setQueue([]);
-    setHistory([]);
-    setSummary("");
-    setError("");
-    setNotice("");
-    demoIndex.current = 0;
+  const demoChoices = useMemo(
+    () =>
+      new Map(demoDrafts.map(({ id, role, avatar }) => [id, { role, avatar }])),
+    [demoDrafts],
+  );
+  function customizeDemo(id: string, choice: DeskChoices) {
+    setDemoDrafts((members) =>
+      members.map((member) =>
+        member.id === id ? { id, name: member.name, ...choice } : member,
+      ),
+    );
   }
+  const [revision, setRevision] = useState(0);
+  const [editorDrafts, setEditorDrafts] = useState<SampleMember[]>([]);
+  const [teamError, setTeamError] = useState("");
+  const team = watching ? desktop.team : demoTeam;
+  const source = !watching
+    ? "Demo office · simulated activity"
+    : desktop.checkedAt
+      ? "Connected · Grok Bot desktop"
+      : desktop.error
+        ? "Desktop unavailable"
+        : "Connecting to Grok Bot…";
 
   function applyTeam(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const parsed = parseTeamDrafts(editorDrafts);
+    const parsed = parseTeamDrafts(editorDrafts.map(sampleDraft));
     if (!parsed) {
-      setTeamError(
-        "Choose 1–12 teammates with names and at most one coordinator.",
-      );
+      setTeamError("Check the names and roles on your sample team.");
       return;
     }
-    restartDemo();
-    setSelected(null);
-    setMessage(null);
-    setTeamDrafts(parsed);
+    setDemoDrafts(
+      editorDrafts.map((member) => ({ ...member, name: member.name.trim() })),
+    );
+    setRevision((old) => old + 1);
     setTeamOpen(false);
-  }
-
-  async function checkConnection() {
-    setConnectOpen(true);
-    setTokenDraft(token);
-    try {
-      const response = await fetch("/api/grok/status", { cache: "no-store" });
-      if (!response.ok) throw new Error();
-      setConnection(await response.json());
-    } catch {
-      setError("Couldn't check Grok configuration. Please try again.");
-    }
-  }
-
-  async function startBrief(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (
-      brief.trim().length < 10 ||
-      running ||
-      (briefMode === "grok" && !token.trim())
-    )
-      return;
-    setBriefOpen(false);
-    setQueue([]);
-    setHistory([]);
-    setSummary("");
-    setError("");
-    setPaused(false);
-    setNotice("");
-    if (briefMode === "demo") {
-      demoIndex.current = 1;
-      setMode("demo");
-      const rehearsal = demoHandoff(0, team);
-      setNotice(
-        rehearsal
-          ? ""
-          : `Demo brief placed on ${team[0].name}'s desk. Add a colleague to rehearse desk visits, or connect Grok for a real response.`,
-      );
-      setQueue(
-        rehearsal
-          ? [
-              {
-                ...rehearsal,
-                message: `Demo brief: ${brief.trim()}\n\nThis is a simulated handoff. Connect Grok to have the team work on the brief.`,
-              },
-            ]
-          : [],
-      );
-      return;
-    }
-    setMode("grok");
-    setRunning(true);
-    const abort = new AbortController();
-    controller.current = abort;
-    try {
-      const response = await fetch("/api/grok/run", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          brief: brief.trim(),
-          team: team.map(({ id, name, role }) => ({ id, name, role })),
-        }),
-        signal: abort.signal,
-      });
-      if (!response.ok) {
-        const body = await response.json();
-        throw new Error(
-          typeof body.error === "string"
-            ? body.error
-            : "Couldn't start the Grok team",
-        );
-      }
-      if (!response.body) throw new Error("The team connection didn't open");
-      await consumeEvents(
-        response.body,
-        (update) => {
-          if (abort.signal.aborted) return;
-          switch (update.type) {
-            case "working":
-              setWorking(update.bot);
-              break;
-            case "handoff":
-              setQueue((items) => [...items, update.handoff]);
-              break;
-            case "complete":
-              setSummary(update.summary);
-              break;
-            case "error":
-              setError(update.message);
-              break;
-          }
-        },
-        team,
-      );
-    } catch (cause) {
-      if (!abort.signal.aborted)
-        setError(
-          cause instanceof Error
-            ? cause.message
-            : "The connection to Grok failed",
-        );
-    } finally {
-      if (controller.current === abort) {
-        setRunning(false);
-        setWorking(null);
-        controller.current = null;
-      }
-    }
   }
 
   return (
@@ -286,95 +209,357 @@ export default function Office() {
         <span className={styles.workspace}>
           Team workspace <span className={styles.divider}>/</span> Floor 01
         </span>
-        <button
-          className={styles.teamSetup}
-          onClick={() => {
-            setEditorDrafts(teamDrafts.map((draft) => ({ ...draft })));
-            setTeamError("");
-            setTeamOpen(true);
-          }}
-        >
-          Team setup <span>{team.length}</span>
-        </button>
-        <button className={styles.connect} onClick={checkConnection}>
-          <Icon name="plug" />
-          {token ? "Grok settings" : "Connect Grok"}
-        </button>
+        {watching ? (
+          desktop.allDesks.length > 0 && (
+            <Dialog.Root>
+              <Dialog.Trigger asChild>
+                <button className={styles.teamSetup}>Choose desks</button>
+              </Dialog.Trigger>
+              <Dialog.Portal>
+                <Dialog.Overlay className={styles.overlay} />
+                <Dialog.Content className={styles.dialog}>
+                  <CloseButton />
+                  <Dialog.Title>Choose desks</Dialog.Title>
+                  <Dialog.Description>
+                    Grok can show group chats alongside bots in its sidebar.
+                    Choose which entries get a desk for this connection.
+                  </Dialog.Description>
+                  <div className={styles.deskChoices}>
+                    {desktop.allDesks.map((bot) => (
+                      <label key={bot.id}>
+                        <input
+                          type="checkbox"
+                          checked={!desktop.hiddenDesks.has(bot.id)}
+                          onChange={(event) =>
+                            desktop.setDeskVisible(bot.id, event.target.checked)
+                          }
+                        />
+                        {bot.name}
+                      </label>
+                    ))}
+                  </div>
+                  <div className={styles.dialogActions}>
+                    <Dialog.Close className={styles.primary}>Done</Dialog.Close>
+                  </div>
+                </Dialog.Content>
+              </Dialog.Portal>
+            </Dialog.Root>
+          )
+        ) : (
+          <button
+            className={styles.teamSetup}
+            onClick={() => {
+              setEditorDrafts(demoDrafts.map((bot) => ({ ...bot })));
+              setTeamError("");
+              setTeamOpen(true);
+            }}
+          >
+            Edit sample team <span>{team.length}</span>
+          </button>
+        )}
       </header>
 
       <main className={styles.main}>
         <section className={styles.heading} aria-labelledby="office-title">
           <div>
-            <div className={styles.eyebrow}>
+            <div className={styles.eyebrow} role="status">
               <span
-                className={`${styles.dot} ${mode === "grok" ? styles.grokDot : ""}`}
+                className={`${styles.dot} ${watching && desktop.checkedAt ? styles.grokDot : ""}`}
               />
-              {mode === "demo"
-                ? "Demo office · simulated activity"
-                : running
-                  ? "Grok team · working on your brief"
-                  : "Grok team · session"}
+              {source}
             </div>
             <h1 id="office-title">
-              A little world.
-              <br className={styles.mobileBreak} /> A working team.
+              {watching ? "Your team’s office" : "Inside the sample office"}
             </h1>
-            <p>Follow the work, one desk visit at a time.</p>
+            <p>
+              {watching
+                ? "Select a teammate to see their latest visible activity."
+                : "Explore the sample team or connect to Grok Bot on Windows."}
+            </p>
           </div>
-          <button
-            className={styles.primary}
-            disabled={running}
-            onClick={() => {
-              setBriefMode(token ? "grok" : "demo");
-              setBriefOpen(true);
-            }}
-          >
-            <Icon name="plus" />
-            Give the team a brief
-          </button>
-        </section>
-
-        {error && (
-          <div className={styles.error} role="alert">
-            <span>{error}</span>
-            <button onClick={() => setError("")} aria-label="Dismiss error">
-              <Icon name="close" />
+          {watching ? (
+            <button
+              className={styles.secondary}
+              onClick={() => setWatching(false)}
+            >
+              Disconnect
             </button>
+          ) : (
+            <button
+              className={styles.primary}
+              onClick={() => setConnectOpen(true)}
+            >
+              <Icon name="plug" />
+              Connect Grok Bot
+            </button>
+          )}
+        </section>
+        {desktop.error && watching && (
+          <div className={styles.error} role="alert">
+            <span>{desktop.error}</span>
+            <button onClick={desktop.retry}>Retry now</button>
           </div>
         )}
-        {notice && (
-          <div className={styles.sessionNotice} role="status">
-            {notice}
-          </div>
-        )}
+        <OfficeFloor
+          key={watching ? "desktop" : `demo-${revision}`}
+          team={team}
+          activity={watching ? desktop.activity : undefined}
+          choices={watching ? desktop.choices : demoChoices}
+          onCustomize={watching ? desktop.customize : customizeDemo}
+          checkedAt={watching ? desktop.checkedAt : undefined}
+          unavailable={Boolean(desktop.error)}
+          allDesksHidden={
+            watching && !team.length && desktop.allDesks.length > 0
+          }
+        />
+      </main>
 
-        <div className={styles.officeGrid}>
-          <section className={styles.worldPanel} aria-label="Office floor">
-            <div className={styles.floorHeading}>
-              <span>
-                <span className={styles.tinyGrid} aria-hidden="true">
-                  ▦
-                </span>{" "}
-                The main office
-              </span>
-              <span>
-                {team.length} {team.length === 1 ? "desk" : "desks"}{" "}
-                <span className={styles.divider}>/</span> plenty of ideas
-              </span>
+      <Dialog.Root open={connectOpen} onOpenChange={setConnectOpen}>
+        <Dialog.Portal>
+          <Dialog.Overlay className={styles.overlay} />
+          <Dialog.Content className={styles.dialog}>
+            <CloseButton />
+            <Dialog.Title>Watch your Grok Bot team</Dialog.Title>
+            <Dialog.Description>
+              On a Mac, you can use the sample office. Live activity requires
+              Windows. Open Grok Bot on the same Windows PC, sign in, and expand
+              the Bots sidebar. To see a task title, open the bot’s Activity
+              panel in Conversation details.
+            </Dialog.Description>
+            <p className={styles.help}>
+              Watching uses no xAI API credits. Manage your bots and their work
+              in Grok Bot.
+            </p>
+            <div className={styles.dialogActions}>
+              <Dialog.Close className={styles.secondary}>Cancel</Dialog.Close>
+              <button
+                className={styles.primary}
+                onClick={() => {
+                  setConnectOpen(false);
+                  setWatching(true);
+                }}
+              >
+                Watch desktop team
+              </button>
             </div>
-            <div className={styles.canvasArea} data-testid="office-world">
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+      <Dialog.Root open={teamOpen} onOpenChange={setTeamOpen}>
+        <Dialog.Portal>
+          <Dialog.Overlay className={styles.overlay} />
+          <Dialog.Content className={`${styles.dialog} ${styles.teamDialog}`}>
+            <CloseButton />
+            <span className={styles.dialogKicker}>Demo office</span>
+            <Dialog.Title>Edit the sample team</Dialog.Title>
+            <Dialog.Description>
+              Choose the teammates and rooms for this preview.
+            </Dialog.Description>
+            <form onSubmit={applyTeam}>
+              <div className={styles.editorRows}>
+                {editorDrafts.map((draft, index) => (
+                  <div className={styles.editorRow} key={draft.id}>
+                    <div>
+                      <label htmlFor={`name-${draft.id}`}>
+                        Teammate {index + 1}
+                      </label>
+                      <input
+                        id={`name-${draft.id}`}
+                        value={draft.name}
+                        maxLength={24}
+                        required
+                        onChange={(event) =>
+                          setEditorDrafts((items) =>
+                            items.map((item) =>
+                              item.id === draft.id
+                                ? { ...item, name: event.target.value }
+                                : item,
+                            ),
+                          )
+                        }
+                      />
+                    </div>
+                    <DeskSettings
+                      name={draft.name}
+                      choice={{ role: draft.role, avatar: draft.avatar }}
+                      onChange={(choice) =>
+                        setEditorDrafts((items) =>
+                          items.map((item) =>
+                            item.id === draft.id
+                              ? { id: item.id, name: item.name, ...choice }
+                              : item,
+                          ),
+                        )
+                      }
+                    />
+                    <button
+                      type="button"
+                      className={styles.removeBot}
+                      disabled={editorDrafts.length <= 1}
+                      aria-label={`Remove teammate ${index + 1}`}
+                      onClick={() =>
+                        setEditorDrafts((items) =>
+                          items.filter((item) => item.id !== draft.id),
+                        )
+                      }
+                    >
+                      <Icon name="close" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                className={styles.addBot}
+                disabled={editorDrafts.length >= 12}
+                onClick={() =>
+                  setEditorDrafts((items) => [
+                    ...items,
+                    {
+                      id: `bot-${crypto.randomUUID()}`,
+                      name: `Teammate ${items.length + 1}`,
+                    },
+                  ])
+                }
+              >
+                <Icon name="plus" />
+                Add teammate <span>{editorDrafts.length} / 12</span>
+              </button>
+              <p className={styles.help}>
+                Changes apply to the sample floor in this tab.
+              </p>
+              {teamError && (
+                <p role="alert" className={styles.teamError}>
+                  {teamError}
+                </p>
+              )}
+              <div className={styles.dialogActions}>
+                <Dialog.Close className={styles.secondary}>Cancel</Dialog.Close>
+                <button className={styles.primary}>Apply team</button>
+              </div>
+            </form>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+    </Tooltip.Provider>
+  );
+}
+
+function OfficeFloor({
+  team,
+  activity,
+  choices,
+  onCustomize,
+  checkedAt,
+  unavailable,
+  allDesksHidden,
+}: {
+  team: readonly Bot[];
+  activity?: ReadonlyMap<string, string>;
+  choices: ReadonlyMap<string, DeskChoices>;
+  onCustomize: (id: string, choice: DeskChoices) => void;
+  checkedAt?: Date;
+  unavailable: boolean;
+  allDesksHidden: boolean;
+}) {
+  const demo = activity === undefined;
+  const [selected, setSelected] = useState<string | null>(null);
+  const [tab, setTab] = useState("team");
+  const [paused, setPaused] = useState(false);
+  const [speed, setSpeed] = useState("1");
+  const [current, setCurrent] = useState<Handoff | null>(null);
+  const [history, setHistory] = useState<Handoff[]>([]);
+  const [message, setMessage] = useState<Handoff | null>(null);
+  const index = useRef(0);
+  const inspected = team.find((bot) => bot.id === selected);
+  const nameOf = (id: string) => team.find((bot) => bot.id === id)?.name;
+  const inTransit = current && !history.some((item) => item.id === current.id);
+
+  useEffect(() => {
+    if (!demo || paused || current || team.length < 2) return;
+    const timer = setTimeout(
+      () => setCurrent(demoHandoff(index.current++, team)),
+      900,
+    );
+    return () => clearTimeout(timer);
+  }, [demo, paused, current, team]);
+
+  const delivered = useCallback(
+    (id: string) => {
+      if (current && current.id === id)
+        setHistory((items) =>
+          items.some((item) => item.id === id)
+            ? items
+            : [...items, current].slice(-60),
+        );
+    },
+    [current],
+  );
+  const settled = useCallback((id: string) => {
+    setCurrent((item) => (item?.id === id ? null : item));
+  }, []);
+  function restartDemo() {
+    setCurrent(null);
+    setHistory([]);
+    setMessage(null);
+    setPaused(false);
+    index.current = 0;
+  }
+
+  function statusOf(bot: Bot) {
+    if (activity) return activity.get(bot.id) || "No activity shown";
+    if (current?.from === bot.id)
+      return inTransit
+        ? `Walking to ${nameOf(current.to)}`
+        : "Returning to desk";
+    return "At their desk";
+  }
+
+  return (
+    <>
+      <div className={styles.officeGrid}>
+        <section className={styles.worldPanel} aria-label="Office floor">
+          <div className={styles.floorHeading}>
+            <span>
+              <span className={styles.tinyGrid} aria-hidden="true">
+                ▦
+              </span>{" "}
+              {demo ? "Sample floor" : "Desktop team"}
+            </span>
+            <span>
+              {team.length} {team.length === 1 ? "desk" : "desks"}
+            </span>
+          </div>
+          <div className={styles.canvasArea} data-testid="office-world">
+            {team.length > 0 ? (
               <OfficeCanvas
                 roster={team}
                 handoff={current}
+                activity={activity}
                 paused={paused}
                 speed={Number(speed)}
-                selected={selected}
-                onSelect={setSelected}
+                selected={inspected?.id ?? null}
+                onSelect={(id) => {
+                  setSelected(id);
+                  setTab("team");
+                }}
                 onDelivered={delivered}
                 onSettled={settled}
               />
-            </div>
-            <div className={styles.worldToolbar}>
+            ) : (
+              <div className={styles.loading}>
+                {allDesksHidden
+                  ? "Choose desks to show teammates on this floor."
+                  : checkedAt
+                    ? "No bots visible on this floor"
+                    : unavailable
+                      ? "Waiting for the Grok Bot sidebar"
+                      : "Looking for your team…"}
+              </div>
+            )}
+          </div>
+          <div className={styles.worldToolbar}>
+            {demo ? (
               <div className={styles.playback}>
                 <Tooltip.Root>
                   <Tooltip.Trigger asChild>
@@ -429,528 +614,196 @@ export default function Office() {
                   </Select.Portal>
                 </Select.Root>
               </div>
-              <span className={styles.sceneHint}>
-                {paused
-                  ? "Office paused"
-                  : "Select a teammate to see their work"}
-              </span>
-            </div>
-          </section>
-
-          <aside className={styles.sidebar} aria-label="Team and activity">
-            <Tabs.Root defaultValue="team" className={styles.tabs}>
-              <Tabs.List
-                className={styles.tabList}
-                aria-label="Office information"
-              >
-                <Tabs.Trigger className={styles.tab} value="team">
-                  On the floor <span>{team.length}</span>
-                </Tabs.Trigger>
-                <Tabs.Trigger className={styles.tab} value="activity">
-                  Activity <span>{history.length}</span>
-                </Tabs.Trigger>
-              </Tabs.List>
-              <Tabs.Content value="team" className={styles.tabContent}>
-                <div className={styles.teamList}>
-                  {team.map((bot) => {
-                    const walking = current?.from === bot.id;
-                    const status = walking
-                      ? inTransit
-                        ? `Walking to ${botById(current.to).name}`
-                        : "Returning to desk"
-                      : working === bot.id
-                        ? "Working on the brief"
-                        : "At their desk";
-                    return (
-                      <button
-                        key={bot.id}
-                        className={`${styles.botRow} ${selected === bot.id ? styles.botSelected : ""}`}
-                        onClick={() =>
-                          setSelected(selected === bot.id ? null : bot.id)
-                        }
-                        aria-pressed={selected === bot.id}
-                      >
-                        <span
-                          className={styles.avatar}
-                          style={
-                            { "--bot-color": bot.color } as React.CSSProperties
-                          }
-                        >
-                          <span className={styles.avatarHead} />
-                          <span className={styles.avatarBody} />
-                        </span>
-                        <span className={styles.botInfo}>
-                          <span className={styles.botName}>
-                            {bot.name}
-                            <span className={styles.role}>{bot.role}</span>
-                          </span>
-                          <span
-                            className={
-                              walking ? styles.walking : styles.botStatus
-                            }
-                          >
-                            {status}
-                          </span>
-                        </span>
-                        <span className={styles.rowArrow} aria-hidden="true">
-                          ›
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-                {inspected ? (
-                  <div className={styles.inspector}>
-                    <div className={styles.inspectorHeader}>
-                      <h2>{inspected.name}&apos;s desk</h2>
-                      <button
-                        className={styles.iconButton}
-                        aria-label="Close teammate details"
-                        onClick={() => setSelected(null)}
-                      >
-                        <Icon name="close" />
-                      </button>
-                    </div>
-                    <p>{inspected.description}</p>
-                    <span className={styles.meta}>
-                      {history.filter((h) => h.from === inspected.id).length}{" "}
-                      handoffs delivered
-                    </span>
-                    <div className={styles.relatedMessages}>
-                      {history
-                        .filter(
-                          (h) =>
-                            h.from === inspected.id || h.to === inspected.id,
-                        )
-                        .slice(-2)
-                        .reverse()
-                        .map((h) => (
-                          <button key={h.id} onClick={() => setMessage(h)}>
-                            {botById(h.from).name} → {botById(h.to).name}
-                            <span>{h.message}</span>
-                          </button>
-                        ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className={styles.teamNote}>
-                    <span className={styles.smallRule} />
-                    <h2>A desk for every kind of work</h2>
-                    <p>
-                      The floor grows with your team. Each role brings its own
-                      furniture, tools, and corner of the office.
-                    </p>
-                  </div>
-                )}
-              </Tabs.Content>
-              <Tabs.Content value="activity" className={styles.tabContent}>
-                <div className={styles.activityList}>
-                  {history.length ? (
-                    [...history].reverse().map((h) => (
-                      <button
-                        className={styles.activityItem}
-                        key={h.id}
-                        onClick={() => setMessage(h)}
-                      >
-                        <span className={styles.meta}>
-                          {h.source === "demo" ? "Demo" : "Grok"} · Delivered
-                        </span>
-                        <strong>
-                          {botById(h.from).name}{" "}
-                          <span aria-hidden="true">→</span> {botById(h.to).name}
-                        </strong>
-                        <span className={styles.excerpt}>{h.message}</span>
-                      </button>
-                    ))
-                  ) : (
-                    <div className={styles.empty}>
-                      <h2>The first handoff is on its way</h2>
-                      <p>
-                        Messages appear here when a teammate reaches the other
-                        desk.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </Tabs.Content>
-            </Tabs.Root>
-            <div className={styles.transit} aria-live="polite">
-              <span className={styles.meta}>
-                {current
-                  ? inTransit
-                    ? "In transit"
-                    : "Delivered · heading home"
-                  : working
-                    ? "At work"
-                    : "Between handoffs"}
-              </span>
-              {current ? (
-                <>
-                  <strong>
-                    {botById(current.from).name} <Icon name="arrow" />{" "}
-                    {botById(current.to).name}
-                  </strong>
-                  <button onClick={() => setMessage(current)}>
-                    {inTransit ? "A message is on its way" : "Read the handoff"}
-                    <span aria-hidden="true">↗</span>
-                  </button>
-                </>
-              ) : (
-                <>
-                  <strong>
-                    {working
-                      ? `${botById(working).name} is thinking`
-                      : "A moment at the desk"}
-                  </strong>
-                  <p>
-                    {team.length === 1
-                      ? "One teammate, one workspace. Add a colleague for desk visits."
-                      : "Good work starts with a conversation"}
-                  </p>
-                </>
-              )}
-              {queue.length > 1 && (
-                <span className={styles.queueCount}>
-                  {queue.length - 1} more handoffs queued
-                </span>
-              )}
-            </div>
-          </aside>
-        </div>
-
-        <section className={styles.belowFloor} aria-label="Session information">
-          <div>
-            <span className={styles.dot} />
-            <span>
-              {mode === "demo"
-                ? "A sample team, getting things done"
-                : running
-                  ? "Grok is working; desk visits play in order"
-                  : "Grok session"}
-            </span>
-          </div>
-          <span>
-            {history.length} delivered <span className={styles.divider}>/</span>{" "}
-            {paused ? "Paused" : `${speed}× playback`}
-          </span>
-        </section>
-        {summary && (
-          <section className={styles.summary}>
-            <span className={styles.meta}>
-              {finalBot.name} · Final response
-            </span>
-            <h2>The team&apos;s take</h2>
-            <p>{summary}</p>
-            {queue.length > 0 && (
-              <span className={styles.meta}>
-                The answer is ready. Remaining desk visits are still playing.
+            ) : (
+              <span className={styles.liveStatus}>
+                {checkedAt
+                  ? `Last checked ${checkedAt.toLocaleTimeString()}`
+                  : "Waiting for desktop activity"}
               </span>
             )}
-          </section>
-        )}
-        <footer className={styles.footer}>
-          <span>Made for watching the work happen</span>
-          <span>
-            Grok / Office <span className={styles.divider}>·</span> Floor 01
-          </span>
-        </footer>
-      </main>
-
-      <Dialog.Root open={connectOpen} onOpenChange={setConnectOpen}>
-        <Dialog.Portal>
-          <Dialog.Overlay className={styles.overlay} />
-          <Dialog.Content className={styles.dialog}>
-            <CloseButton />
-            <span className={styles.dialogKicker}>Bring the team online</span>
-            <Dialog.Title>Connect Grok</Dialog.Title>
-            <Dialog.Description>
-              Grok runs on the server. Your xAI API key never belongs in this
-              browser.
-            </Dialog.Description>
-            <div className={styles.connectionState}>
-              <span className={styles.dot} />
-              <span>
-                {connection
-                  ? connection.configured
-                    ? `Server configured · ${connection.model}`
-                    : "Server needs an xAI key and office access token"
-                  : "Checking server configuration…"}
-              </span>
-            </div>
-            <p className={styles.help}>
-              Set up the server using the repository&apos;s README, then enter
-              its office access token here. The token stays in this tab&apos;s
-              memory.
-            </p>
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                setToken(tokenDraft.trim());
-                setConnectOpen(false);
-              }}
+            <span className={styles.sceneHint}>
+              {paused ? "Office paused" : "Select a desk to inspect"}
+            </span>
+          </div>
+        </section>
+        <aside className={styles.sidebar} aria-label="Team and activity">
+          <Tabs.Root value={tab} onValueChange={setTab} className={styles.tabs}>
+            <Tabs.List
+              className={styles.tabList}
+              aria-label="Office information"
             >
-              <label htmlFor="office-token">Office access token</label>
-              <input
-                id="office-token"
-                type="password"
-                autoComplete="off"
-                value={tokenDraft}
-                onChange={(event) => setTokenDraft(event.target.value)}
-                placeholder="Your office token"
-                maxLength={256}
-              />
-              <div className={styles.dialogActions}>
-                <Dialog.Close className={styles.secondary}>Cancel</Dialog.Close>
-                <button
-                  className={styles.primary}
-                  disabled={!tokenDraft.trim()}
-                >
-                  Use this token
-                </button>
+              <Tabs.Trigger className={styles.tab} value="team">
+                On the floor <span>{team.length}</span>
+              </Tabs.Trigger>
+              <Tabs.Trigger className={styles.tab} value="activity">
+                Activity <span>{demo ? history.length : activity?.size}</span>
+              </Tabs.Trigger>
+            </Tabs.List>
+            <Tabs.Content value="team" className={styles.tabContent}>
+              <div className={styles.teamList}>
+                {team.map((bot) => (
+                  <button
+                    key={bot.id}
+                    className={`${styles.botRow} ${selected === bot.id ? styles.botSelected : ""}`}
+                    onClick={() =>
+                      setSelected(selected === bot.id ? null : bot.id)
+                    }
+                    aria-pressed={selected === bot.id}
+                  >
+                    <span
+                      className={styles.avatar}
+                      aria-hidden="true"
+                      data-avatar={bot.avatar}
+                      style={{
+                        backgroundImage: `url(${avatarSpriteUrl(bot.avatar)})`,
+                      }}
+                    />
+                    <span className={styles.botInfo}>
+                      <span className={styles.botName}>
+                        {bot.name}
+                        <span className={styles.role}>{bot.role}</span>
+                      </span>
+                      <span className={styles.botStatus}>{statusOf(bot)}</span>
+                    </span>
+                    <span className={styles.rowArrow} aria-hidden="true">
+                      ›
+                    </span>
+                  </button>
+                ))}
               </div>
-            </form>
-            <p className={styles.help}>
-              A token is checked when you run a brief. This team uses up to{" "}
-              {stages.length} xAI API calls per run and uses your account
-              credits.
-            </p>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
-
-      <Dialog.Root open={briefOpen} onOpenChange={setBriefOpen}>
-        <Dialog.Portal>
-          <Dialog.Overlay className={styles.overlay} />
-          <Dialog.Content className={styles.dialog}>
-            <CloseButton />
-            <span className={styles.dialogKicker}>Something to work on</span>
-            <Dialog.Title>Give the team a brief</Dialog.Title>
-            <Dialog.Description>
-              Tell the team what you want to figure out. They&apos;ll pass the
-              work from desk to desk.
-            </Dialog.Description>
-            <form onSubmit={startBrief}>
-              <Tabs.Root value={briefMode} onValueChange={setBriefMode}>
-                <Tabs.List className={styles.modeTabs} aria-label="Run mode">
-                  <Tabs.Trigger value="demo" className={styles.modeTab}>
-                    Demo rehearsal
-                  </Tabs.Trigger>
-                  <Tabs.Trigger value="grok" className={styles.modeTab}>
-                    Real Grok team
-                  </Tabs.Trigger>
-                </Tabs.List>
-              </Tabs.Root>
-              <p className={styles.help}>
-                {briefMode === "demo"
-                  ? team.length === 1
-                    ? "A lone teammate keeps the demo brief at their desk. Connect Grok to get a real response."
-                    : "Sample messages rehearse the desk visits. Connect Grok to get real answers to your brief."
-                  : `${stages.length} role-specific Grok calls work on your brief. No browsing, code execution, or external messages.`}
-              </p>
-              <label htmlFor="brief">The brief</label>
-              <textarea
-                id="brief"
-                value={brief}
-                onChange={(event) => setBrief(event.target.value)}
-                minLength={10}
-                maxLength={2000}
-                required
-                placeholder="Help me plan a small community book exchange…"
-                rows={5}
-              />
-              <span className={styles.characterCount}>
-                {brief.length} / 2,000
-              </span>
-              {briefMode === "grok" && !token && (
-                <p className={styles.help}>
-                  Connect Grok and enter your office token before running a real
-                  brief.
-                </p>
-              )}
-              <div className={styles.dialogActions}>
-                <Dialog.Close className={styles.secondary}>Cancel</Dialog.Close>
-                <button
-                  className={styles.primary}
-                  disabled={
-                    brief.trim().length < 10 || (briefMode === "grok" && !token)
-                  }
-                >
-                  {briefMode === "demo"
-                    ? team.length === 1
-                      ? "Place brief on desk"
-                      : "Rehearse the handoffs"
-                    : `Run Grok · up to ${stages.length} calls`}
-                  <Icon name="arrow" />
-                </button>
-              </div>
-            </form>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
-
-      <Dialog.Root
-        open={Boolean(message)}
-        onOpenChange={(open) => {
-          if (!open) setMessage(null);
-        }}
-      >
-        <Dialog.Portal>
-          <Dialog.Overlay className={styles.overlay} />
-          <Dialog.Content
-            className={`${styles.dialog} ${styles.messageDialog}`}
-          >
-            <CloseButton />
-            <span className={styles.dialogKicker}>
-              {message?.source === "demo"
-                ? "Simulated conversation"
-                : "Grok conversation"}
-            </span>
-            <Dialog.Title>
-              {message
-                ? `${botById(message.from).name} → ${botById(message.to).name}`
-                : "Handoff"}
-            </Dialog.Title>
-            <Dialog.Description>
-              {message && history.some((h) => h.id === message.id)
-                ? "Delivered at the desk"
-                : "In transit to the desk"}
-            </Dialog.Description>
-            <p className={styles.messageBody}>{message?.message}</p>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
-      <Dialog.Root open={teamOpen} onOpenChange={setTeamOpen}>
-        <Dialog.Portal>
-          <Dialog.Overlay className={styles.overlay} />
-          <Dialog.Content className={`${styles.dialog} ${styles.teamDialog}`}>
-            <CloseButton />
-            <span className={styles.dialogKicker}>
-              An office shaped by your team
-            </span>
-            <Dialog.Title>Set up your team</Dialog.Title>
-            <Dialog.Description>
-              Add 1–12 teammates and choose their roles. The office changes size
-              and each department brings its own equipment. A coordinator gets a
-              private head office.
-            </Dialog.Description>
-            <form onSubmit={applyTeam}>
-              <div className={styles.editorRows}>
-                {editorDrafts.map((draft, index) => (
-                  <div className={styles.editorRow} key={draft.id}>
-                    <div>
-                      <label htmlFor={`name-${draft.id}`}>
-                        Teammate {index + 1}
-                      </label>
-                      <input
-                        id={`name-${draft.id}`}
-                        value={draft.name}
-                        maxLength={24}
-                        required
-                        onChange={(event) =>
-                          setEditorDrafts((items) =>
-                            items.map((item) =>
-                              item.id === draft.id
-                                ? { ...item, name: event.target.value }
-                                : item,
-                            ),
-                          )
-                        }
-                      />
-                    </div>
-                    <div>
-                      <label id={`role-${draft.id}`}>Role</label>
-                      <Select.Root
-                        value={draft.role}
-                        onValueChange={(value) =>
-                          setEditorDrafts((items) =>
-                            items.map((item) =>
-                              item.id === draft.id
-                                ? { ...item, role: value as BotRole }
-                                : item,
-                            ),
-                          )
-                        }
-                      >
-                        <Select.Trigger
-                          className={styles.roleSelect}
-                          aria-labelledby={`role-${draft.id}`}
-                        >
-                          <Select.Value />
-                          <span aria-hidden="true">⌄</span>
-                        </Select.Trigger>
-                        <Select.Portal>
-                          <Select.Content
-                            className={styles.selectContent}
-                            position="popper"
-                            sideOffset={4}
-                          >
-                            <Select.Viewport>
-                              {roles.map((role) => (
-                                <Select.Item
-                                  className={styles.selectItem}
-                                  value={role}
-                                  key={role}
-                                >
-                                  <Select.ItemText>{role}</Select.ItemText>
-                                </Select.Item>
-                              ))}
-                            </Select.Viewport>
-                          </Select.Content>
-                        </Select.Portal>
-                      </Select.Root>
-                    </div>
+              {inspected && (
+                <div className={styles.inspector}>
+                  <div className={styles.inspectorHeader}>
+                    <h2>{inspected.name}’s desk</h2>
                     <button
-                      type="button"
-                      className={styles.removeBot}
-                      disabled={editorDrafts.length <= 1}
-                      aria-label={`Remove teammate ${index + 1}`}
-                      onClick={() =>
-                        setEditorDrafts((items) =>
-                          items.filter((item) => item.id !== draft.id),
-                        )
-                      }
+                      className={styles.iconButton}
+                      aria-label="Close teammate details"
+                      onClick={() => setSelected(null)}
                     >
                       <Icon name="close" />
                     </button>
                   </div>
-                ))}
-              </div>
-              <button
-                type="button"
-                className={styles.addBot}
-                disabled={editorDrafts.length >= 12}
-                onClick={() =>
-                  setEditorDrafts((items) => [
-                    ...items,
-                    {
-                      id: `bot-${crypto.randomUUID()}`,
-                      name: `Teammate ${items.length + 1}`,
-                      role: "Generalist",
-                    },
-                  ])
-                }
-              >
-                <Icon name="plus" />
-                Add teammate <span>{editorDrafts.length} / 12</span>
-              </button>
-              <p className={styles.help}>
-                The coordinator is optional; choose at most one. Applying a team
-                starts a fresh demo and stops any active Grok run. Team setup
-                stays in this tab until refresh.
-              </p>
-              {teamError && (
-                <p role="alert" className={styles.teamError}>
-                  {teamError}
-                </p>
+                  <p>{demo ? inspected.description : statusOf(inspected)}</p>
+                  {inspected.roleLabel && (
+                    <p className={styles.meta}>
+                      Grok title · {inspected.roleLabel}
+                    </p>
+                  )}
+                  <DeskSettings
+                    name={inspected.name}
+                    jobTitle={inspected.roleLabel}
+                    choice={choices.get(inspected.id)}
+                    onChange={(choice) => onCustomize(inspected.id, choice)}
+                  />
+                </div>
               )}
-              <div className={styles.dialogActions}>
-                <Dialog.Close className={styles.secondary}>Cancel</Dialog.Close>
-                <button className={styles.primary}>Apply team</button>
+            </Tabs.Content>
+            <Tabs.Content value="activity" className={styles.tabContent}>
+              <div className={styles.activityList}>
+                {demo ? (
+                  history.length ? (
+                    history
+                      .slice()
+                      .reverse()
+                      .map((h) => (
+                        <button
+                          className={styles.activityItem}
+                          key={h.id}
+                          onClick={() => setMessage(h)}
+                        >
+                          <span className={styles.meta}>Demo · Delivered</span>
+                          <strong>
+                            {nameOf(h.from)} → {nameOf(h.to)}
+                          </strong>
+                          <span className={styles.excerpt}>{h.message}</span>
+                        </button>
+                      ))
+                  ) : (
+                    <div className={styles.empty}>
+                      <h2>No handoffs yet</h2>
+                    </div>
+                  )
+                ) : activity?.size ? (
+                  team
+                    .filter((bot) => activity.has(bot.id))
+                    .map((bot) => (
+                      <button
+                        className={styles.activityItem}
+                        key={bot.id}
+                        onClick={() => {
+                          setSelected(bot.id);
+                          setTab("team");
+                        }}
+                      >
+                        <strong>{bot.name}</strong>
+                        <span className={styles.excerpt}>
+                          {activity.get(bot.id)}
+                        </span>
+                      </button>
+                    ))
+                ) : (
+                  <div className={styles.empty}>
+                    <h2>No activity reported</h2>
+                    <p>
+                      Visible task details appear here as Grok Bot shares them.
+                    </p>
+                  </div>
+                )}
               </div>
-            </form>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
-    </Tooltip.Provider>
+            </Tabs.Content>
+          </Tabs.Root>
+          {demo && current && (
+            <div className={styles.transit}>
+              <span className={styles.meta}>
+                {inTransit ? "In transit" : "Delivered · heading home"}
+              </span>
+              <strong>
+                {nameOf(current.from)} <Icon name="arrow" />{" "}
+                {nameOf(current.to)}
+              </strong>
+              <button onClick={() => setMessage(current)}>
+                Read the sample handoff <span aria-hidden="true">↗</span>
+              </button>
+            </div>
+          )}
+        </aside>
+      </div>
+      <section className={styles.belowFloor} aria-label="Session information">
+        <div>
+          <span className={styles.dot} />
+          {demo ? "Simulated desk visits" : "Read-only desktop view"}
+        </div>
+        {demo && <span>{paused ? "Paused" : `${speed}× playback`}</span>}
+      </section>
+      {message && (
+        <Dialog.Root
+          open
+          onOpenChange={(open) => {
+            if (!open) setMessage(null);
+          }}
+        >
+          <Dialog.Portal>
+            <Dialog.Overlay className={styles.overlay} />
+            <Dialog.Content
+              className={`${styles.dialog} ${styles.messageDialog}`}
+            >
+              <CloseButton />
+              <span className={styles.dialogKicker}>
+                Simulated conversation
+              </span>
+              <Dialog.Title>
+                {nameOf(message.from)} → {nameOf(message.to)}
+              </Dialog.Title>
+              <Dialog.Description>
+                {history.some((h) => h.id === message.id)
+                  ? "Delivered at the desk"
+                  : "In transit to the desk"}
+              </Dialog.Description>
+              <p className={styles.messageBody}>{message.message}</p>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
+      )}
+    </>
   );
 }

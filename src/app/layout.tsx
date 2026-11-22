@@ -9,7 +9,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Grok / Office",
   description:
-    "A pixel office for your Grok team. Follow the work, one desk visit at a time.",
+    "Watch your Grok bots and their visible task activity in a read-only pixel office.",
 };
 
 export default function RootLayout({

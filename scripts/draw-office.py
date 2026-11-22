@@ -5,7 +5,7 @@ from PIL import Image, ImageDraw, ImageEnhance
 OUT = Path(__file__).resolve().parents[1] / 'public' / 'office'
 OUT.mkdir(parents=True, exist_ok=True)
 
-def draw_bot(color, hair, glasses, frame):
+def draw_bot(color, hair, glasses, frame, style=None):
     image = Image.new('RGBA', (32, 40))
     pen = ImageDraw.Draw(image)
     a, b = 15, 35
@@ -32,6 +32,39 @@ def draw_bot(color, hair, glasses, frame):
         pen.rectangle((a-3,b-26,a,b-24), outline='#4b4761')
         pen.rectangle((a+2,b-26,a+5,b-24), outline='#4b4761')
     pen.point((a+2,b-22), fill='#cf8f7d')
+    if style == 'feminine':
+        # Wavy bob and a side bun with a brass clip; cream shirt under a cardigan.
+        pen.rectangle((a-8,b-29,a-5,b-23), fill=hair)
+        pen.rectangle((a-7,b-23,a-5,b-17), fill=hair)
+        pen.rectangle((a+5,b-28,a+6,b-18), fill=hair)
+        pen.rectangle((a-9,b-28,a-8,b-25), fill='#a96c53')
+        pen.line((a-4,b-30,a+2,b-30), fill='#a96c53')
+        pen.line((a-6,b-26,a-5,b-26), fill='#edc764')
+        pen.polygon([(a-4,b-19),(a+3,b-19),(a,b-13)], fill='#fff1c8')
+        pen.line((a,b-13,a,b-7), fill='#446d70')
+        pen.rectangle((a+3,b-12,a+5,b-11), fill='#a4c9b6')
+    elif style == 'masculine':
+        # Short swept hair, beard and a collared overshirt with a patch pocket.
+        pen.rectangle((a-4,b-32,a+2,b-30), fill=hair)
+        pen.rectangle((a-6,b-29,a-5,b-24), fill=hair)
+        pen.line((a-2,b-31,a+2,b-31), fill='#9a7660')
+        pen.rectangle((a-3,b-21,a+4,b-20), fill=hair)
+        pen.point((a-4,b-22), fill=hair)
+        pen.point((a+5,b-22), fill=hair)
+        pen.line((a-3,b-19,a,b-16,a+3,b-19), fill='#f7eac6')
+        pen.line((a,b-15,a,b-7), fill='#a56e4a')
+        pen.rectangle((a+2,b-15,a+5,b-13), fill='#e5b280')
+    elif style == 'neutral':
+        # Ribbed watch cap, round glasses and a pocket on a pair of overalls.
+        pen.rectangle((a-5,b-31,a+4,b-28), fill='#d2a64e')
+        pen.rectangle((a-3,b-33,a+3,b-31), fill='#d2a64e')
+        pen.rectangle((a-6,b-29,a+6,b-27), fill='#b88642')
+        for x in (-3,0,3):
+            pen.line((a+x,b-32,a+x,b-30), fill='#eccb77')
+        pen.rectangle((a-4,b-15,a+4,b-6), fill='#526b7f')
+        pen.line((a-3,b-19,a-3,b-15), fill='#526b7f', width=2)
+        pen.line((a+3,b-19,a+3,b-15), fill='#526b7f', width=2)
+        pen.line((a-2,b-12,a+2,b-12), fill='#a2bcb9')
     return ImageEnhance.Color(image).enhance(1.18)
 
 bots = [
@@ -44,10 +77,20 @@ bots = [
     ('analyst', '#d3ad57', '#5a5147', True),
     ('generalist', '#82a7a0', '#74604f', False),
 ]
-for name, color, hair, glasses in bots:
+def save_strip(name, color, hair, glasses, style=None):
     strip = Image.new('RGBA', (128, 40))
     for frame in range(4):
-        strip.paste(draw_bot(color, hair, glasses, frame), (frame * 32, 0))
+        strip.paste(draw_bot(color, hair, glasses, frame, style), (frame * 32, 0))
     strip.save(OUT / f'{name}.png')
 
-print(f'Wrote eight walking sprite strips to {OUT}')
+for bot in bots:
+    save_strip(*bot)
+
+for style, color, hair, glasses in [
+    ('feminine', '#78aba3', '#6f4b49', False),
+    ('masculine', '#c98d62', '#75564c', False),
+    ('neutral', '#aab889', '#65544e', True),
+]:
+    save_strip(f'avatar-{style}', color, hair, glasses, style)
+
+print(f'Wrote the walking sprite strips to {OUT}')

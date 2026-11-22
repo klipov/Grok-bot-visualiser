@@ -1,9 +1,22 @@
-import { test, expect } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { team } from "../../src/lib/office/team";
 import { createRoster, layoutOffice } from "../../src/lib/office/layout";
 import { officeMetrics, project } from "../../src/lib/office/art";
 
-test("the rendered office delivers a message at the desk and supports playback and inspection", async ({
+// Only tests that install an explicit observer fixture can request desktop data.
+test.beforeEach(async ({ page }) => {
+  await page.route(/\/api\/grok\/|https:\/\/api\.x\.ai\//, async (route) => {
+    await route.abort();
+    throw new Error(`Unexpected Grok request: ${route.request().url()}`);
+  });
+});
+
+async function watchDesktop(page: Page) {
+  await page.getByRole("button", { name: "Connect Grok Bot" }).click();
+  await page.getByRole("button", { name: "Watch desktop team" }).click();
+}
+
+test("the sample office supports playback, desk inspection and delivered messages", async ({
   page,
 }) => {
   const errors: string[] = [];
@@ -11,278 +24,341 @@ test("the rendered office delivers a message at the desk and supports playback a
   await page.setViewportSize({ width: 1440, height: 1100 });
   await page.goto("/");
   const world = page.locator('[data-ready="true"]');
-  await expect(world).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator("canvas")).toBeVisible();
+  await expect(world).toHaveAttribute("data-team-size", "3", {
+    timeout: 30_000,
+  });
+  await expect(world).toHaveAttribute("data-head-offices", "1");
   await page.getByRole("button", { name: "Pause office" }).click();
-  await expect(page.getByText("Office paused", { exact: true })).toBeVisible();
-  const phase = await world.getAttribute("data-phase");
-  await page.waitForTimeout(150);
-  const pausedCanvas = await page.locator("canvas").screenshot();
-  await page.waitForTimeout(800);
-  await expect(world).toHaveAttribute("data-phase", phase!);
-  expect((await page.locator("canvas").screenshot()).equals(pausedCanvas)).toBe(
-    true,
-  );
-  await page.getByRole("button", { name: /Fern Librarian/ }).click();
-  await expect(
-    page.getByRole("heading", { name: "Fern's desk" }),
-  ).toBeVisible();
+  await expect(page.getByText("Office paused")).toBeVisible();
   const canvas = page.locator("canvas");
+  const pausedImage = await canvas.screenshot();
+  await page.waitForTimeout(400);
+  expect((await canvas.screenshot()).equals(pausedImage)).toBe(true);
+
+  await page.getByRole("button", { name: /^Copywriting Cathy/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "Copywriting Cathy’s desk" }),
+  ).toBeVisible();
   const bounds = (await canvas.boundingBox())!;
   const roster = createRoster(team);
   const layout = layoutOffice(roster);
   const metrics = officeMetrics(layout);
-  const kit = project(roster.find((bot) => bot.id === "kit")!.home, layout, 20);
+  const sam = project(roster.find((bot) => bot.id === "sam")!.home, layout, 20);
   const scale = Math.min(
     bounds.width / metrics.width,
     bounds.height / metrics.height,
   );
   await canvas.click({
     position: {
-      x: (bounds.width - metrics.width * scale) / 2 + kit.x * scale,
-      y: (bounds.height - metrics.height * scale) / 2 + kit.y * scale,
+      x: (bounds.width - metrics.width * scale) / 2 + sam.x * scale,
+      y: (bounds.height - metrics.height * scale) / 2 + sam.y * scale,
     },
   });
-  await expect(page.getByRole("heading", { name: "Kit's desk" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Sales Sam’s desk" }),
+  ).toBeVisible();
+
   await page.getByRole("combobox", { name: "Playback speed" }).click();
   await page.getByRole("option", { name: "4× speed" }).click();
   await page.getByRole("button", { name: "Resume office" }).click();
   await page.getByRole("tab", { name: /Activity/ }).click();
-  await expect(page.getByText("Demo · Delivered").first()).toBeVisible({
-    timeout: 20_000,
-  });
-  await page
+  const delivered = page
     .getByRole("button", { name: /Demo · Delivered/ })
-    .first()
-    .click();
+    .first();
+  await expect(delivered).toBeVisible({ timeout: 20_000 });
+  await delivered.click();
   await expect(page.getByRole("dialog")).toBeVisible();
-  await expect(
-    page.getByText("Delivered at the desk", { exact: true }),
-  ).toBeVisible();
+  await expect(page.getByText("Delivered at the desk")).toBeVisible();
   await page.keyboard.press("Escape");
-  await page.getByRole("tab", { name: /On the floor/ }).click();
-  await page.screenshot({
-    path: "test-results/office-desktop.png",
-    fullPage: true,
-  });
+  await page.getByRole("button", { name: "Restart demo" }).click();
+  await expect(
+    page.getByRole("heading", { name: "No handoffs yet" }),
+  ).toBeVisible();
   expect(errors).toEqual([]);
 });
 
-test("mobile layout fits and the brief dialog works with keyboard", async ({
+test(
+  "the mobile connection dialog can be inspected and dismissed without reading the desktop",
+  { tag: "@platform" },
+  async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/");
+    await expect(page.locator("canvas")).toBeVisible({ timeout: 30_000 });
+    const open = page.getByRole("button", { name: "Connect Grok Bot" });
+    await open.focus();
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog", {
+      name: "Watch your Grok Bot team",
+    });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toHaveAccessibleDescription(
+      /On a Mac, you can use the sample office\. Live activity requires Windows\./,
+    );
+    await expect(
+      dialog.getByRole("button", { name: "Watch desktop team" }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(
+      page.getByText("Demo office · simulated activity"),
+    ).toBeVisible();
+  },
+);
+
+test(
+  "live observation reports the Windows requirement on other platforms",
+  { tag: "@platform" },
+  async ({ request, baseURL }) => {
+    test.skip(process.platform === "win32", "Windows has the desktop observer");
+    const response = await request.post("/api/grok/observe", {
+      headers: {
+        origin: new URL(baseURL!).origin,
+        "x-office-observer": "desktop",
+      },
+    });
+    expect(response.status()).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "The desktop connection is available on Windows.",
+    });
+  },
+);
+
+type VisibleBot = {
+  id: string;
+  name: string;
+  role?: string;
+  task?: string;
+  status?: string;
+};
+
+test("the desktop floor shows concurrent work, refreshes task labels in place and follows roster changes", async ({
   page,
 }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
+  test.setTimeout(75_000);
+  let bots: VisibleBot[] = [
+    {
+      id: "a",
+      name: "Juno",
+      role: "Staff Copywriter",
+      status: "Working",
+      task: "Review the catalogue",
+    },
+    { id: "b", name: "Sales Lee", task: "Prepare the April proposal" },
+    { id: "c", name: "Manager Jo" },
+  ];
+  let reads = 0;
+  await page.route("**/api/grok/observe", async (route) => {
+    reads++;
+    expect(route.request().method()).toBe("POST");
+    expect(route.request().headers()["x-office-observer"]).toBe("desktop");
+    await route.fulfill({ json: { bots } });
+  });
   await page.goto("/");
-  await expect(page.locator('[data-ready="true"]')).toBeVisible({
+  await page.getByRole("button", { name: "Connect Grok Bot" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  expect(reads).toBe(0);
+  await page.getByRole("button", { name: "Watch desktop team" }).click();
+  await expect(page.getByText("Connected · Grok Bot desktop")).toBeVisible();
+  const world = page.locator('[data-ready="true"]');
+  await expect(world).toHaveAttribute("data-team-size", "3", {
     timeout: 30_000,
   });
-  await expect(page.locator("canvas")).toBeVisible();
+  await expect(world).toHaveAttribute("data-head-offices", "1");
+  await expect(world).toHaveAttribute("data-phase", "idle");
+  await expect(
+    page.getByRole("button", { name: /Copywriting Cathy/ }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: /Pause office|Edit sample team/ }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: /Manager Jo.*No activity shown/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", {
+      name: /Juno.*Copywriter.*Working · Review the catalogue/,
+    }),
+  ).toBeVisible();
+  await page.getByRole("tab", { name: "Activity 2" }).click();
+  await expect(
+    page.getByRole("button", { name: /Sales Lee.*Prepare the April proposal/ }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: /Juno.*Review the catalogue/ })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Juno’s desk" }),
+  ).toBeVisible();
+  const department = page.getByRole("combobox", { name: "Department" });
+  const gender = page.getByRole("combobox", { name: "Avatar gender" });
+  const junoRow = page.getByRole("button", { name: /^Juno/ });
+  const junoSprite = junoRow.locator("[data-avatar]");
+  await expect(department).toHaveValue("auto");
+  await expect(gender).toHaveValue("auto");
+  await expect(junoSprite).toHaveCSS("background-image", /avatar-neutral\.png/);
+  await expect(page.getByText("Grok title · Staff Copywriter")).toBeVisible();
+
+  const canvas = await page.locator("canvas").elementHandle();
+  const [juno, lee, jo] = bots;
+  bots = [lee, jo, { ...juno, task: "Revise the headline" }];
+  await expect(
+    page.getByRole("button", { name: /Juno.*Revise the headline/ }),
+  ).toBeVisible({ timeout: 12_000 });
   expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
+    await canvas!.evaluate(
+      (element) => element === document.querySelector("canvas"),
     ),
   ).toBe(true);
-  await page.getByRole("button", { name: "Give the team a brief" }).click();
-  await page
-    .getByLabel("The brief", { exact: true })
-    .fill("Plan a neighbourhood book exchange");
-  await page.getByRole("button", { name: "Rehearse the handoffs" }).click();
-  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await expect(world).toHaveAttribute("data-phase", "idle");
+  await department.selectOption("Manager");
+  await expect(world).toHaveAttribute("data-head-offices", "2");
+  await expect(gender).toHaveValue("auto");
+  await gender.selectOption("masculine");
+  await expect(junoSprite).toHaveCSS(
+    "background-image",
+    /avatar-masculine\.png/,
+  );
+  await expect(junoRow).toContainText("Manager");
+  bots = [
+    lee,
+    jo,
+    {
+      ...juno,
+      role: "Human Resources Manager",
+      task: "Check the onboarding list",
+    },
+  ];
+  await expect(junoRow).toContainText("Check the onboarding list", {
+    timeout: 12_000,
+  });
+  await expect(
+    page.getByText("Grok title · Human Resources Manager"),
+  ).toBeVisible();
+  await expect(department).toHaveValue("Manager");
+  await expect(gender).toHaveValue("masculine");
+  await gender.selectOption("auto");
+  await expect(junoSprite).toHaveCSS("background-image", /avatar-neutral\.png/);
+  await expect(world).toHaveAttribute("data-head-offices", "2");
+  await department.selectOption("auto");
+  await expect(junoRow).toContainText("HR");
+  await expect(world).toHaveAttribute("data-head-offices", "1");
+  bots = [lee];
+  await expect(world).toHaveAttribute("data-team-size", "1", {
+    timeout: 15_000,
+  });
+  await expect(world).toHaveAttribute("data-head-offices", "0");
+  await expect(page.getByRole("heading", { name: "Juno’s desk" })).toHaveCount(
+    0,
+  );
+  await expect(page.getByRole("tab", { name: "Activity 1" })).toBeVisible();
+  await page.getByRole("button", { name: "Disconnect" }).click();
   await expect(
     page.getByText("Demo office · simulated activity"),
   ).toBeVisible();
-  await page.screenshot({
-    path: "test-results/office-mobile.png",
-    fullPage: true,
-  });
+  await expect(world).toHaveAttribute("data-team-size", "3");
+  await expect(page.getByText("Prepare the April proposal")).toHaveCount(0);
+  const readsAtDisconnect = reads;
+  await page.waitForTimeout(6500);
+  expect(reads).toBe(readsAtDisconnect);
 });
 
-test("a streamed Grok handoff becomes a desk visit and the final answer remains readable", async ({
+test("a group chat can be excluded from the floor across polls and restored", async ({
   page,
 }) => {
-  await page.route("**/api/grok/status", (route) =>
-    route.fulfill({ json: { configured: true, model: "test-model" } }),
+  let writerTask = "Review the draft";
+  await page.route("**/api/grok/observe", (route) =>
+    route.fulfill({
+      json: {
+        bots: [
+          { id: "writer", name: "Writer Jean", task: writerTask },
+          { id: "group", name: "Launch group", task: "Review launch dates" },
+        ],
+      },
+    }),
   );
-  await page.route("**/api/grok/run", async (route) => {
-    expect(route.request().headers().authorization).toBe(
-      "Bearer test-office-token",
-    );
-    expect(route.request().postDataJSON().brief).toBe(
-      "Plan a neighbourhood book exchange",
-    );
-    const events = [
-      { type: "working", bot: "atlas" },
-      {
-        type: "handoff",
-        handoff: {
-          id: "live-1",
-          from: "atlas",
-          to: "mira",
-          message: "Start by identifying a venue and volunteer organiser.",
-          source: "grok",
-        },
-      },
-      {
-        type: "complete",
-        summary: "Use the community hall and start with one shelf.",
-      },
-    ];
-    await route.fulfill({
-      contentType: "application/x-ndjson",
-      body: events.map((event) => JSON.stringify(event)).join("\n") + "\n",
-    });
-  });
   await page.goto("/");
-  await expect(page.locator('[data-ready="true"]')).toBeVisible({
+  await watchDesktop(page);
+  const world = page.locator('[data-ready="true"]');
+  await expect(world).toHaveAttribute("data-team-size", "2", {
     timeout: 30_000,
   });
-  await page.getByRole("button", { name: "Connect Grok" }).click();
-  await page
-    .getByLabel("Office access token", { exact: true })
-    .fill("test-office-token");
-  await page.getByRole("button", { name: "Use this token" }).click();
-  await page.getByRole("button", { name: "Give the team a brief" }).click();
-  await expect(
-    page.getByRole("tab", { name: "Real Grok team" }),
-  ).toHaveAttribute("data-state", "active");
-  await page
-    .getByLabel("The brief", { exact: true })
-    .fill("Plan a neighbourhood book exchange");
-  await page.getByRole("button", { name: "Run Grok · up to 6 calls" }).click();
-  await expect(
-    page.getByText("Use the community hall and start with one shelf."),
-  ).toBeVisible();
-  await page.getByRole("combobox", { name: "Playback speed" }).click();
-  await page.getByRole("option", { name: "4× speed" }).click();
-  await page.getByRole("tab", { name: /Activity/ }).click();
-  await expect(page.getByText("Grok · Delivered")).toBeVisible({
-    timeout: 20_000,
+
+  const choose = page.getByRole("button", { name: "Choose desks" });
+  const dialog = page.getByRole("dialog", { name: "Choose desks" });
+  const group = dialog.getByRole("checkbox", {
+    name: "Launch group",
+    exact: true,
   });
+  const done = dialog.getByRole("button", { name: "Done" });
+  await choose.click();
+  await group.uncheck();
+  await done.click();
+  await expect(world).toHaveAttribute("data-team-size", "1");
+  await expect(page.getByRole("button", { name: /^Launch group/ })).toHaveCount(
+    0,
+  );
+  await page.getByRole("tab", { name: "Activity 1" }).click();
+  writerTask = "Proofread the final copy";
+  await expect(page.getByText(writerTask, { exact: true })).toBeVisible({
+    timeout: 12_000,
+  });
+  await expect(page.getByText("Review launch dates")).toHaveCount(0);
+  await expect(world).toHaveAttribute("data-team-size", "1");
+
+  await choose.click();
+  await expect(group).not.toBeChecked();
+  await group.check();
+  await done.click();
+  await expect(world).toHaveAttribute("data-team-size", "2");
+  await page.getByRole("tab", { name: "Activity 2" }).click();
   await expect(
-    page.getByText("Start by identifying a venue and volunteer organiser."),
+    page.getByRole("button", { name: /Launch group.*Review launch dates/ }),
   ).toBeVisible();
 });
 
-test("failed Grok connection is shown without pretending it was a demo", async ({
+test("an unreadable desktop clears stale work and retry handles an empty roster", async ({
   page,
 }) => {
-  await page.route("**/api/grok/status", (route) =>
-    route.fulfill({ json: { configured: true, model: "test-model" } }),
-  );
-  await page.route("**/api/grok/run", (route) =>
-    route.fulfill({
-      status: 401,
-      json: { error: "The office access token isn't correct." },
-    }),
+  test.setTimeout(45_000);
+  let result: { bots: VisibleBot[] } | { error: string } = {
+    bots: [{ id: "a", name: "Local artist", task: "Design the cover" }],
+  };
+  await page.route("**/api/grok/observe", (route) =>
+    route.fulfill({ status: "error" in result ? 503 : 200, json: result }),
   );
   await page.goto("/");
-  await page.getByRole("button", { name: "Connect Grok" }).click();
-  await page
-    .getByLabel("Office access token", { exact: true })
-    .fill("wrong-token");
-  await page.getByRole("button", { name: "Use this token" }).click();
-  await page.getByRole("button", { name: "Give the team a brief" }).click();
-  await page
-    .getByLabel("The brief", { exact: true })
-    .fill("Plan a neighbourhood book exchange");
-  await page.getByRole("button", { name: "Run Grok · up to 6 calls" }).click();
+  await watchDesktop(page);
   await expect(
-    page
-      .getByRole("alert")
-      .filter({ hasText: "The office access token isn't correct." }),
+    page.getByRole("button", { name: /Local artist.*Design the cover/ }),
   ).toBeVisible();
-  await expect(
-    page.getByText("Grok team · session", { exact: true }),
-  ).toBeVisible();
-});
-
-test("a streamed error keeps the partial Grok handoff available for delivery", async ({
-  page,
-}) => {
-  await page.route("**/api/grok/status", (route) =>
-    route.fulfill({ json: { configured: true, model: "test-model" } }),
-  );
-  await page.route("**/api/grok/run", (route) =>
-    route.fulfill({
-      contentType: "application/x-ndjson",
-      body:
-        [
-          {
-            type: "handoff",
-            handoff: {
-              id: "partial-1",
-              from: "atlas",
-              to: "mira",
-              message:
-                "The venue plan is ready; the next step still needs work.",
-              source: "grok",
-            },
-          },
-          {
-            type: "error",
-            message:
-              "Grok took too long to respond. Completed handoffs are still available.",
-          },
-        ]
-          .map((event) => JSON.stringify(event))
-          .join("\n") + "\n",
-    }),
-  );
-  await page.goto("/");
-  await expect(page.locator("canvas")).toBeVisible({ timeout: 30_000 });
-  await page.getByRole("button", { name: "Connect Grok" }).click();
-  await page
-    .getByLabel("Office access token", { exact: true })
-    .fill("test-office-token");
-  await page.getByRole("button", { name: "Use this token" }).click();
-  await page.getByRole("button", { name: "Give the team a brief" }).click();
-  await page
-    .getByLabel("The brief", { exact: true })
-    .fill("Plan a neighbourhood book exchange");
-  await page.getByRole("button", { name: "Run Grok · up to 6 calls" }).click();
-  await expect(
-    page.getByRole("alert").filter({ hasText: "Grok took too long" }),
-  ).toBeVisible();
-  await page.getByRole("combobox", { name: "Playback speed" }).click();
-  await page.getByRole("option", { name: "4× speed" }).click();
-  await page.getByRole("tab", { name: /Activity/ }).click();
-  await expect(page.getByText("Grok · Delivered")).toBeVisible({
-    timeout: 20_000,
+  result = { error: "Open the Grok Bot window." };
+  const error = page.getByRole("main").getByRole("alert");
+  await expect(error).toContainText("Open the Grok Bot window.", {
+    timeout: 12_000,
   });
+  await expect(page.getByText("Desktop unavailable")).toBeVisible();
+  await expect(page.locator("canvas")).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "On the floor 0" })).toBeVisible();
   await expect(
-    page.getByText("The venue plan is ready; the next step still needs work."),
-  ).toBeVisible();
+    page.getByRole("button", { name: /Local artist|Copywriting Cathy/ }),
+  ).toHaveCount(0);
+  await page.getByRole("tab", { name: "Activity 0" }).click();
   await expect(
-    page.getByText("Grok team · session", { exact: true }),
+    page.getByRole("heading", { name: "No activity reported" }),
   ).toBeVisible();
+  result = { bots: [] };
+  await page.getByRole("button", { name: "Retry now" }).click();
+  await expect(page.getByText("No bots visible on this floor")).toBeVisible();
+  await expect(error).toHaveCount(0);
+  await expect(page.locator("canvas")).toHaveCount(0);
 });
 
-test("a demo brief replaces a returning trip and still reaches the next desk", async ({
-  page,
-}) => {
-  await page.goto("/");
-  const world = page.locator('[data-ready="true"]');
-  await expect(page.locator("canvas")).toBeVisible({ timeout: 30_000 });
-  await page.getByRole("combobox", { name: "Playback speed" }).click();
-  await page.getByRole("option", { name: "4× speed" }).click();
-  await expect(world).toHaveAttribute("data-phase", "returning", {
-    timeout: 15_000,
-  });
-  await page.getByRole("button", { name: "Pause office" }).click();
-  await page.getByRole("button", { name: "Give the team a brief" }).click();
-  await page
-    .getByLabel("The brief", { exact: true })
-    .fill("Plan a rooftop community garden");
-  await page.getByRole("button", { name: "Rehearse the handoffs" }).click();
-  await page.getByRole("tab", { name: /Activity/ }).click();
-  await expect(
-    page.getByText("Demo brief: Plan a rooftop community garden", {
-      exact: false,
-    }),
-  ).toBeVisible({ timeout: 15_000 });
-});
-
-test("the office still renders when WebGL is unavailable", async ({ page }) => {
+test("the office renders when WebGL is unavailable", async ({ page }) => {
   await page.addInitScript(() => {
     const original = HTMLCanvasElement.prototype.getContext;
     HTMLCanvasElement.prototype.getContext = function (
@@ -311,107 +387,84 @@ test("an asset failure produces an accessible graphics error", async ({
       .getByRole("status")
       .filter({ hasText: "The office renderer could not start" }),
   ).toBeVisible({ timeout: 30_000 });
-  await expect(
-    page.getByText("Try another browser or check its graphics settings", {
-      exact: false,
-    }),
-  ).toBeVisible();
 });
 
-test("team composition rebuilds the actual floor and removes an absent head office", async ({
+test("sample roster edits resize the floor from one specialist to twelve occupied desks", async ({
   page,
 }) => {
   test.setTimeout(60_000);
-  await page.setViewportSize({ width: 1440, height: 1100 });
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
+  await page.getByRole("button", { name: /Edit sample team/ }).click();
+  await page.getByRole("button", { name: "Remove teammate 3" }).click();
+  await page.getByRole("button", { name: "Remove teammate 1" }).click();
+  await page.getByLabel("Teammate 1", { exact: true }).fill("Support Ada");
+  await expect(page.getByRole("combobox", { name: "Department" })).toHaveValue(
+    "auto",
+  );
+  await expect(
+    page.getByRole("combobox", { name: "Avatar gender" }),
+  ).toHaveValue("auto");
+  await page.getByRole("button", { name: "Apply team" }).click();
   const world = page.locator('[data-ready="true"]');
-  await expect(world).toHaveAttribute("data-team-size", "5", {
+  await expect(world).toHaveAttribute("data-team-size", "1", {
     timeout: 30_000,
   });
-  await expect(world).toHaveAttribute("data-head-offices", "1");
-  const originalDepth = Number(await world.getAttribute("data-floor-depth"));
-  await page.getByRole("button", { name: "Pause office" }).click();
-  const originalScene = await page.locator("canvas").screenshot();
-  await page.getByRole("button", { name: /Team setup/ }).click();
-  await page
-    .getByRole("button", { name: "Remove teammate 5", exact: true })
-    .click();
-  await page
-    .getByRole("button", { name: "Remove teammate 1", exact: true })
-    .click();
-  await page.getByRole("button", { name: "Apply team", exact: true }).click();
-  await expect(world).toHaveAttribute("data-team-size", "3");
-  await expect(world).toHaveAttribute("data-rooms", "3");
+  await expect(world).toHaveAttribute("data-rooms", "1");
   await expect(world).toHaveAttribute("data-head-offices", "0");
-  expect(Number(await world.getAttribute("data-floor-depth"))).toBeLessThan(
-    originalDepth,
-  );
-  expect(
-    (await page.locator("canvas").screenshot()).equals(originalScene),
-  ).toBe(false);
-  await page.screenshot({
-    path: "test-results/office-three-specialists.png",
-    fullPage: true,
-  });
-  await page.getByRole("button", { name: /Team setup/ }).click();
-  for (let i = 0; i < 9; i++)
+  await expect(world).toHaveAttribute("data-phase", "idle");
+  const teammate = page.getByRole("button", { name: /^Support Ada/ });
+  const sprite = teammate.locator("[data-avatar]");
+  await expect(teammate).toHaveAccessibleName(/Support Ada.*Support/);
+  await expect(sprite).toHaveCSS("background-image", /avatar-feminine\.png/);
+  const originalDepth = Number(await world.getAttribute("data-floor-depth"));
+  await teammate.click();
+  const department = page.getByRole("combobox", { name: "Department" });
+  const gender = page.getByRole("combobox", { name: "Avatar gender" });
+  await gender.selectOption("masculine");
+  await expect(sprite).toHaveCSS("background-image", /avatar-masculine\.png/);
+  await expect(department).toHaveValue("auto");
+  // The back of this single room contains the furniture, above the nameplate.
+  const furniture = async () => {
+    const canvas = world.locator("canvas");
+    await canvas.scrollIntoViewIfNeeded();
+    const bounds = (await canvas.boundingBox())!;
+    return page.screenshot({
+      clip: {
+        x: bounds.x + bounds.width * 0.46,
+        y: bounds.y + bounds.height * 0.26,
+        width: bounds.width * 0.16,
+        height: bounds.height * 0.15,
+      },
+    });
+  };
+  const supportFurniture = await furniture();
+  await department.selectOption("Finance");
+  await expect(teammate).toContainText("Finance");
+  await expect(sprite).toHaveCSS("background-image", /avatar-masculine\.png/);
+  await expect
+    .poll(async () => (await furniture()).equals(supportFurniture))
+    .toBe(false);
+  await department.selectOption("auto");
+  await expect(teammate).toHaveAccessibleName(/Support Ada.*Support/);
+  await expect
+    .poll(async () => (await furniture()).equals(supportFurniture))
+    .toBe(true);
+  await gender.selectOption("auto");
+  await expect(sprite).toHaveCSS("background-image", /avatar-feminine\.png/);
+
+  await page.getByRole("button", { name: /Edit sample team/ }).click();
+  for (let i = 1; i < 12; i++)
     await page.getByRole("button", { name: /Add teammate/ }).click();
-  await page.getByRole("button", { name: "Apply team", exact: true }).click();
+  await page.getByRole("button", { name: "Apply team" }).click();
   await expect(world).toHaveAttribute("data-team-size", "12");
   await expect(world).toHaveAttribute("data-rooms", "12");
   expect(Number(await world.getAttribute("data-floor-depth"))).toBeGreaterThan(
     originalDepth,
   );
-  await page.screenshot({
-    path: "test-results/office-twelve-teammates.png",
-    fullPage: true,
-  });
-});
-
-test("one teammate gets a compact role-specific workspace and no invented handoffs", async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/");
-  await page.getByRole("button", { name: /Team setup/ }).click();
-  for (let i = 5; i > 1; i--)
-    await page
-      .getByRole("button", { name: `Remove teammate ${i}`, exact: true })
-      .click();
-  await page.getByRole("combobox", { name: "Role", exact: true }).click();
-  await page.getByRole("option", { name: "Librarian", exact: true }).click();
-  await page.getByLabel("Teammate 1", { exact: true }).fill("Ada");
-  await page.getByRole("button", { name: "Apply team", exact: true }).click();
-  const world = page.locator('[data-ready="true"]');
-  await expect(world).toHaveAttribute("data-team-size", "1", {
-    timeout: 30_000,
-  });
-  await expect(world).toHaveAttribute("data-head-offices", "0");
-  await expect(
-    page.getByRole("button", { name: /Ada Librarian/ }),
-  ).toBeVisible();
-  await expect(
-    page.getByText("One teammate, one workspace.", { exact: false }),
-  ).toBeVisible();
-  await expect(world).toHaveAttribute("data-phase", "idle");
-  await page.getByRole("button", { name: "Give the team a brief" }).click();
-  await page
-    .getByLabel("The brief", { exact: true })
-    .fill("Organise the neighbourhood book exchange");
-  await page.getByRole("button", { name: "Place brief on desk" }).click();
-  await expect(
-    page
-      .getByRole("status")
-      .filter({ hasText: "Demo brief placed on Ada's desk" }),
-  ).toBeVisible();
-  await expect(world).toHaveAttribute("data-phase", "idle");
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
-  await page.screenshot({
-    path: "test-results/office-one-librarian.png",
-    fullPage: true,
-  });
 });
